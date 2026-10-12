@@ -1,8 +1,8 @@
 # Atem (Jarvis Kitchen)
 
 Assistente pessoal por voz, local e offline, para a cozinha. Interface de rosto
-pixelado em tela cheia no computador da cozinha (LG All-in-One) e servidor de IA
-na rede local (Ryzen 5 5600GT + GTX 1080).
+pixelado em tela cheia no computador da cozinha e servidor de IA
+na rede local.
 
 - Plano, decisoes e inspecao do ambiente: `docs/plano.md`
 - Protocolo cliente/servidor: `docs/protocolo.md`
