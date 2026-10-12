@@ -1,0 +1,11 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+numpy>=1.26,<3
+# Palavra de ativacao local (ONNX, CPU). Modelos: scripts/prepare_models.py
+openwakeword>=0.6,<1
+# Transcricao local (whisper.cpp, CPU). Modelo ggml: scripts/prepare_models.py whisper-small
+pywhispercpp>=1.5,<2
+# Voz da Luna (Kokoro-82M via ONNX, CPU; voz feminina pt-BR pf_dora). Modelo: scripts/prepare_models.py kokoro
+# Traz o espeak-ng embutido (espeakng-loader); nada a instalar no sistema.
+kokoro-onnx>=0.6,<1
+# Motor alternativo (vozes pt-BR masculinas, mais leve): pip install "piper-tts>=1.8,<2" e [tts] engine = "piper"

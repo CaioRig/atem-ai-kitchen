@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# Interpretadores instalados pelo gerenciador do Python (nao pertencem ao repo)
+Python/
+# Node
+node_modules/
+client/public/js/
+# Configuracao local com token
+config/settings.toml
+# Certificado/chave TLS locais (gerados por scripts/make-cert.ps1)
+config/certs/
+# Dados e logs locais
+logs/
+data/
+!data/.gitkeep
+# Modelos de IA (baixados por procedimento explicito)
+models/

@@ -1,0 +1,122 @@
+# Copie para config/settings.toml e ajuste. O arquivo real e ignorado pelo git.
+
+[server]
+# IP da interface de rede local onde o servidor escuta. Evite 0.0.0.0.
+bind_host = "192.168.1.6"
+port = 8800
+log_level = "INFO"
+# HTTPS (recomendado): o navegador so libera o microfone em HTTPS ou localhost.
+# Gere certificado + chave com scripts\make-cert.ps1 (caminhos relativos a raiz do projeto).
+# Deixe vazio para servir em HTTP puro.
+tls_certfile = "config/certs/server.crt"
+tls_keyfile = "config/certs/server.key"
+# Permite que o cliente envie set_state para simular estados (so desenvolvimento).
+debug_allow_state_override = false
+
+[auth]
+# Token compartilhado entre cliente e servidor. Gerado por scripts/setup-server.ps1.
+token = "TROQUE-ESTE-TOKEN"
+
+[assistant]
+# Frase exibida na interface; deve corresponder ao modelo em [wake].
+# Padrao: "hey Luna" (modelo da comunidade, baixado por scripts\prepare-models.ps1). A frase final
+# do produto e "hey Atem" (pronuncia "ei-tem"), que exige treino: docs/palavra-de-ativacao.md.
+wake_word = "hey Luna"
+
+[wake]
+# Modelo openWakeWord (.onnx) da palavra de ativacao. Opcoes:
+#   models/openwakeword/hey_luna.onnx        comunidade, em uso (wake_word = "hey Luna")
+#   models/openwakeword/hey_jarvis_v0.1.onnx oficial, ingles (prepare_models.py hey_jarvis)
+#   models/openwakeword/hey_atem.onnx        customizado, treinado por voce (docs/palavra-de-ativacao.md)
+model = "models/openwakeword/hey_luna.onnx"
+# Score minimo (0-1) para considerar a palavra detectada; ajuste apos ouvir falsos positivos/negativos.
+threshold = 0.5
+# Fim da fala por voz (Silero VAD, baixado junto com os modelos do openWakeWord). Decide se cada quadro
+# de 80 ms tem voz, independentemente do volume: fala baixa continua sendo fala e ruido de fundo
+# (ventilador, agua, geladeira) nao vira fala. Se o arquivo faltar, o servidor usa um limiar de energia.
+vad_model = "models/openwakeword/silero_vad.onnx"
+# Silencio (s) apos a fala que encerra a captura. 1,2 s: pausas naturais de ate ~1 s nao cortam a frase
+# (uma pausa de 0,7 s na fala aparece como ~0,9 s de silencio para o VAD). Menor = resposta mais rapida.
+listen_silence_s = 1.2
+# Duracao maxima (s) de uma fala; o que passar disso e cortado.
+listen_max_s = 8.0
+# Audio (s) anterior a deteccao que entra na captura: a deteccao dispara 80-160 ms depois do fim de
+# "hey Luna" e, sem isso, quem fala emendado perde a primeira palavra. "Luna" nao vaza para o texto
+# (o VAD do whisper descarta o fragmento).
+preroll_s = 0.32
+
+[transcription]
+# Transcricao local com whisper.cpp (CPU). Modelo ggml multilingue baixado por scripts/prepare-models.ps1
+# (padrao: whisper-small-q8_0, ~265 MB: mesmo texto que o small completo nos testes, ~20 % mais rapido e
+# metade da RAM). Alternativas: ggml-small.bin (completo, 465 MB), ggml-small-q5_1.bin (190 MB).
+# base/tiny erram mais em portugues. Caminhos relativos a raiz do projeto.
+model = "models/whisper/ggml-small-q8_0.bin"
+# VAD (Silero, 0,9 MB, baixado junto): descarta silencio/ruido antes de transcrever.
+vad_model = "models/whisper/ggml-silero-v5.1.2.bin"
+language = "pt"
+# 0 = todos os nucleos logicos (medido 15-20 % mais rapido que a metade).
+threads = 0
+# Contexto minimo do encoder do Whisper. O encoder custa o mesmo para 2 s ou 30 s de fala (1500 posicoes);
+# 768 corta esse custo pela metade (medido: 2,4 s -> 1,0 s por frase no Ryzen) com o mesmo texto em
+# frases limpas e com ruido moderado. Em ruido muito forte (fala quase no nivel do ruido) frases muito
+# curtas podem sair piores: use 0 (contexto completo, mais lento) se isso acontecer na cozinha.
+audio_ctx = 768
+# Segundos que "Transcricao concluida" fica na tela antes de voltar a "Aguardando ativacao".
+done_hold_s = 4.0
+
+[llm]
+# IA local via Ollama (https://ollama.com), sem nuvem e sem chaves. A inferencia roda no servidor
+# Ryzen. Desative com enabled = false para manter so a transcricao.
+enabled = true
+# URL do Ollama. No mesmo computador que este servidor: http://127.0.0.1:11434 (padrao do Ollama).
+# Em outra maquina da rede local: http://<ip-da-maquina>:11434, e nela defina OLLAMA_HOST (docs/ia-local.md).
+# Somente enderecos da rede local sao aceitos (loopback, 10.x, 172.16-31.x, 192.168.x ou nome de maquina).
+url = "http://127.0.0.1:11434"
+# Modelo instalado no Ollama (ollama pull <modelo>). Sugestao para GTX 1080 (8 GB) e pt-BR: qwen2.5:7b.
+# Alternativas: llama3.1:8b, gemma2:9b; mais leve: qwen2.5:3b. Meca RAM/VRAM e latencia antes de fixar.
+model = "qwen2.5:7b"
+# Tempo maximo (s) para conectar e para receber a resposta completa.
+connect_timeout_s = 5.0
+timeout_s = 60.0
+# Quanto tempo o modelo fica carregado na GPU apos a ultima pergunta (evita recarregar a cada "hey Luna").
+keep_alive = "10m"
+# Criatividade (0 = deterministico) e limite de tokens da resposta (respostas curtas por padrao).
+temperature = 0.7
+max_tokens = 300
+# Instrucao de sistema. Vazio = instrucao padrao da Luna (server/services/llm.py). Para personalizar:
+# system_prompt = """Voce e a Luna, ..."""
+system_prompt = ""
+
+[tts]
+# Voz da Luna: sintese local no servidor (CPU), reproducao no computador da cozinha. Sem nuvem.
+# Desative com enabled = false para manter so o texto na tela.
+enabled = true
+# Motor: "kokoro" (padrao; Kokoro-82M, voz feminina pt-BR "pf_dora", 24 kHz, ~330 MB) ou "piper"
+# (Piper; vozes oficiais pt-BR sao todas masculinas: faber, cadu, edresson, jeff; 22 kHz, ~63 MB).
+# Arquivos: scripts\prepare-models.ps1 kokoro   (ou: piper-pt_BR-faber-medium). Ver docs/voz.md.
+engine = "kokoro"
+# Kokoro: modelo + arquivo de vozes. Alternativa menor/mais rapida e um pouco pior: kokoro-v1.0.int8.onnx (114 MB).
+model = "models/tts/kokoro-v1.0.onnx"
+voices = "models/tts/voices-v1.0.bin"
+# Voz do Kokoro (pf_ = feminina, pm_ = masculina): pf_dora, pm_alex, pm_santa. Ignorado no Piper
+# (no Piper a voz e o proprio modelo, ex.: model = "models/tts/pt_BR-faber-medium.onnx").
+voice = "pf_dora"
+# Idioma do espeak-ng usado pelo Kokoro para converter texto em fonemas.
+language = "pt-br"
+# Velocidade (0.5 lenta .. 2.0 rapida) e volume (1.0 = original; o Kokoro soa um pouco baixo, 1.5 e razoavel).
+speed = 1.0
+volume = 1.0
+# "hey Luna" no meio de uma resposta falada interrompe o audio e abre a escuta.
+barge_in = true
+# Respostas maiores que isso sao faladas ate o fim de uma frase antes do limite (o texto completo fica na tela).
+max_chars = 1500
+
+[memory]
+# Memoria persistente local da Luna (SQLite, so neste computador). Guarda apenas o que a pessoa pede:
+# "Luna, lembre que eu nao gosto de cebola" / "lembre que tenho uma air fryer" / "o que voce lembra sobre
+# minha cozinha?" / "esqueca que..." / "apague todas as minhas memorias" (pede confirmacao). Ver docs/memoria.md.
+enabled = true
+# Arquivo do banco (relativo a raiz do projeto). Apagar o arquivo apaga todas as memorias.
+path = "data/memory.sqlite3"
+# Maximo de memorias relevantes enviadas a IA por pergunta (as instrucoes de resposta vao sempre).
+max_context = 8

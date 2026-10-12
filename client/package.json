@@ -1,0 +1,14 @@
+{
+  "name": "jarvis-kitchen-client",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "test": "npm run build && node --test \"tests/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

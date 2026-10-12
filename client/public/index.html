@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>LUNA</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="stage">
+        <canvas id="face" aria-label="Rosto do assistente"></canvas>
+        <div id="mood" class="mood" aria-live="polite">Inicializando</div>
+        <div id="status" class="status">Inicializando…</div>
+      </section>
+      <aside id="panel">
+        <div id="clock">
+          <div id="time">--:--</div>
+          <div id="date">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Clima · Ouro Fino, MG</div>
+          <div id="weather-text" class="text">Sem dados</div>
+          <div id="weather-updated" class="muted">
+            Sem dados — nunca atualizado
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Você disse</div>
+          <div id="heard" class="text">—</div>
+        </div>
+        <div class="card grow">
+          <div class="label">Resposta</div>
+          <div id="reply" class="text">—</div>
+        </div>
+        <div id="indicators">
+          <span id="conn" class="pill warn">Servidor: conectando…</span>
+          <button
+            id="mic"
+            class="pill"
+            type="button"
+            title="Ligar ou desligar o microfone (tecla M)"
+          >
+            Microfone
+          </button>
+          <button
+            id="cancel"
+            class="pill warn hidden"
+            type="button"
+            title="Cancelar a interação ou parar a fala (tecla Esc)"
+          >
+            Cancelar
+          </button>
+          <button
+            id="retry"
+            class="pill warn hidden"
+            type="button"
+            title="Repetir a última pergunta à IA ou a última fala (tecla R)"
+          >
+            Tentar novamente
+          </button>
+          <button
+            id="memory"
+            class="pill hidden"
+            type="button"
+            title="Ver e gerenciar o que a Luna lembra (tecla L)"
+            aria-expanded="false"
+          >
+            Memória
+          </button>
+          <span id="offline-badge" class="pill warn">Modo offline</span>
+        </div>
+      </aside>
+    </main>
+    <section id="memory-panel" class="hidden" role="dialog" aria-labelledby="memory-title">
+      <header>
+        <div id="memory-title" class="label">Memória da Luna</div>
+        <button id="memory-close" class="pill" type="button" title="Fechar (tecla L ou Esc)">
+          Fechar
+        </button>
+      </header>
+      <p id="memory-empty" class="muted">
+        Nada guardado ainda. Diga “hey Luna, lembre que…”.
+      </p>
+      <ul id="memory-list"></ul>
+      <footer>
+        <span class="muted">Guardado só neste servidor, em data/memory.sqlite3.</span>
+        <button
+          id="memory-clear"
+          class="pill warn hidden"
+          type="button"
+          title="Apagar todas as memórias (pede um segundo toque)"
+        >
+          Apagar todas
+        </button>
+      </footer>
+    </section>
+    <div id="toast" class="toast hidden" aria-live="polite"></div>
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
