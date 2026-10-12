@@ -14,9 +14,12 @@ import {
   moodLabel,
   resolveToken,
   statusText,
+  weatherCardText,
+  weatherUpdatedLabel,
   type MicState,
   type Mood,
   type WakeInfo,
+  type WeatherInfo,
 } from "./state.js";
 import { Panel } from "./ui.js";
 import { JarvisSocket } from "./ws.js";
@@ -228,6 +231,8 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           if (!tts.available) console.warn("voz indisponível:", tts.reason);
           if (!memory.available) console.warn("memória indisponível:", memory.reason);
           panel.setMemory(memory.available, memory.count);
+          // Clima: o servidor manda o que tem no cache (nunca consulta a fonte ao conectar).
+          if (msg.weather) showWeather(panel, msg.weather);
           debug = msg.debug;
           serverState = msg.state;
           detail = msg.detail;
@@ -293,6 +298,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           if (toast) panel.showToast(toast);
           break;
         }
+        case "weather":
+          // Resposta a uma pergunta sobre o tempo: o cartão "Clima" mostra o resumo e de quando são os dados.
+          showWeather(panel, msg);
+          break;
         case "error":
           console.warn("servidor:", msg.code, msg.message);
           break;
@@ -364,14 +373,39 @@ function main(): void {
   else runLocal(panel, face);
 }
 
+/** Cartão "Clima" a partir do estado do servidor; uma cópia fica no localStorage para o quiosque mostrar algo
+ *  enquanto o servidor não responde (o cache de verdade é o do servidor, em data/memory.sqlite3). */
+function showWeather(panel: Panel, w: WeatherInfo): void {
+  panel.setWeather(weatherCardText(w), weatherUpdatedLabel(w), Boolean(w.stale));
+  try {
+    const saved: WeatherInfo = {
+      available: w.available,
+      summary: w.summary,
+      detail: w.detail,
+      message: w.message,
+      updated_at: w.updated_at ?? null,
+      stale: w.stale,
+      status: w.status,
+    };
+    localStorage.setItem(WEATHER_KEY, JSON.stringify(saved));
+  } catch {
+    // armazenamento indisponível (modo privado): o cartão continua funcionando
+  }
+}
+
 function restoreWeather(panel: Panel): void {
   try {
     const raw = localStorage.getItem(WEATHER_KEY);
-    if (!raw) return panel.setWeather("Sem dados", null);
-    const saved = JSON.parse(raw) as { text: string; updatedAt: string };
-    panel.setWeather(saved.text, new Date(saved.updatedAt));
+    if (!raw) return panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));
+    const saved = JSON.parse(raw) as Partial<WeatherInfo> & { text?: string; updatedAt?: string };
+    if (typeof saved.available !== "boolean") {
+      // formato anterior ({text, updatedAt}): mostra o texto e descarta a hora, que não distinguia consulta de previsão
+      return panel.setWeather(saved.text || "Sem dados", weatherUpdatedLabel({ available: false }));
+    }
+    const info: WeatherInfo = { ...saved, available: saved.available };
+    panel.setWeather(weatherCardText(info), weatherUpdatedLabel(info), Boolean(info.stale));
   } catch {
-    panel.setWeather("Sem dados", null);
+    panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));
   }
 }
 

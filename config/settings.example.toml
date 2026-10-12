@@ -134,3 +134,30 @@ max_tokens = 600
 spoken_max_chars = 420
 # Por quanto tempo (s) "essa receita" / "nesta receita" se refere a ultima resposta (so em memoria do processo).
 followup_ttl_s = 1800
+
+[weather]
+# Previsao do tempo (Fase 8) para a cozinha, pela Open-Meteo (https://open-meteo.com): gratuita para uso nao
+# comercial, sem chave, dados CC BY 4.0. A Luna consulta a fonte so quando alguem pergunta e o cache nao vale mais;
+# o resultado fica no mesmo SQLite da memoria (tabela weather_cache) e continua disponivel sem internet, sempre
+# com a hora da ultima atualizacao e aviso quando esta antigo. Nenhuma conversa, memoria ou audio vai ao provedor.
+enabled = true
+# Local (coordenadas da geocodificacao da Open-Meteo para o municipio de Ouro Fino, MG; 924 m) e fuso IANA.
+latitude = -22.28306
+longitude = -46.36889
+location_name = "Ouro Fino, MG"
+timezone = "America/Sao_Paulo"
+# Dias de previsao pedidos a fonte (1..16). "Proximos tres dias" usa os tres primeiros.
+forecast_days = 5
+# Tempo maximo (s) para conectar e para receber a resposta. Sem internet, a falha e imediata (DNS).
+connect_timeout_s = 5.0
+timeout_s = 10.0
+# Validade do cache: condicoes atuais (a fonte atualiza a cada 15 min a 1 h) e previsao dos proximos dias
+# (modelos atualizados a cada 1 a 6 h). Dentro da validade a Luna responde do cache, sem consultar a fonte.
+current_ttl_s = 1800
+forecast_ttl_s = 10800
+# Dados mais antigos que isso (s) sao anunciados explicitamente como desatualizados quando a fonte falha.
+stale_after_s = 21600
+# Depois de uma falha (sem internet), espera isso (s) antes de tentar a fonte de novo; enquanto isso usa o cache.
+retry_cooldown_s = 60
+# Arquivo do cache. Vazio = o mesmo de [memory] path (tabela separada).
+cache_path = ""

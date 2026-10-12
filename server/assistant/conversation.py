@@ -22,6 +22,7 @@ from server.assistant.memory import MemoryCommands, MemoryOutcome
 from server.assistant.recipes import RecipeAssistant
 from server.assistant.speech import Speech
 from server.assistant.state import AssistantState, StateMachine
+from server.assistant.weather import WeatherAssistant, WeatherIntent
 from server.services.llm import LanguageModel, LLMError
 
 log = logging.getLogger("jarvis.conversation")
@@ -29,6 +30,7 @@ log = logging.getLogger("jarvis.conversation")
 ReplyHandler = Callable[[str, bool], Awaitable[None]]  # (texto, final)
 ReplyErrorHandler = Callable[[str, str], Awaitable[None]]  # (codigo, mensagem amigavel)
 MemoryEventHandler = Callable[[dict], Awaitable[None]]  # evento `memory` para a interface
+WeatherEventHandler = Callable[[dict], Awaitable[None]]  # evento `weather` para a interface
 
 DETAIL_THINKING = "Pensando…"
 DETAIL_REPLYING = "Respondendo…"
@@ -52,6 +54,8 @@ class Conversation:
         memory: MemoryCommands | None = None,
         on_memory: MemoryEventHandler | None = None,
         recipes: RecipeAssistant | None = None,
+        weather: WeatherAssistant | None = None,
+        on_weather: WeatherEventHandler | None = None,
     ) -> None:
         self.machine = machine
         self.llm = llm
@@ -62,7 +66,10 @@ class Conversation:
         self.memory = memory  # memoria persistente: comandos por voz e contexto para a IA
         self.on_memory = on_memory
         self.recipes = recipes  # receitas e ingredientes: comandos de estoque, contexto e fala resumida
+        self.weather = weather  # previsao do tempo (Fase 8): fonte + cache, sem IA
+        self.on_weather = on_weather
         self.memory_replies = 0
+        self.weather_replies = 0
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm") if llm else None
         self._task: asyncio.Task | None = None
         self._cancel: threading.Event | None = None
@@ -76,7 +83,7 @@ class Conversation:
 
     @property
     def available(self) -> bool:
-        return self.llm is not None or self.memory is not None or self.recipes is not None
+        return self.llm is not None or self.memory is not None or self.recipes is not None or self.weather is not None
 
     @property
     def busy(self) -> bool:
@@ -108,6 +115,16 @@ class Conversation:
             self._cancel_hold()
             self._cancel = None
             self._task = asyncio.create_task(self._run_local(outcome))
+            await asyncio.sleep(0)
+            return True
+        # Perguntas sobre o tempo (Fase 8): respondidas pelo servico meteorologico e pelo cache, sem a IA.
+        # A consulta a fonte roda em uma thread com timeouts; sem internet, a resposta sai do cache.
+        weather_intent = self.weather.match(text) if self.weather is not None else None
+        if weather_intent is not None:
+            self._retry_text = None
+            self._cancel_hold()
+            self._cancel = None
+            self._task = asyncio.create_task(self._run_weather(weather_intent))
             await asyncio.sleep(0)
             return True
         if self.llm is None:
@@ -162,6 +179,25 @@ class Conversation:
             if outcome.event is not None and self.on_memory is not None:
                 await self.on_memory(outcome.event)
             if self.speaker is not None and await self.speaker.speak(outcome.reply):
+                return
+            await self._idle(DETAIL_READY)
+        finally:
+            if self._task is asyncio.current_task():
+                self._task = None
+
+    async def _run_weather(self, intent: WeatherIntent) -> None:
+        """Resposta sobre o tempo: mesmo ciclo visual de uma pergunta; a fonte (ou o cache) responde, não a IA.
+        O texto completo vai para a tela e a interface recebe o evento `weather`; a voz fala a versão curta."""
+        assert self.weather is not None
+        try:
+            await self.machine.set(AssistantState.THINKING, DETAIL_THINKING)
+            outcome = await self.weather.answer(intent)
+            self.weather_replies += 1
+            log.info("pergunta sobre o tempo (%s) respondida: %s", outcome.intent, outcome.status)
+            await self._emit(outcome.reply, final=True)
+            if self.on_weather is not None:
+                await self.on_weather(outcome.event)
+            if self.speaker is not None and await self.speaker.speak(outcome.spoken):
                 return
             await self._idle(DETAIL_READY)
         finally:

@@ -249,3 +249,37 @@ export function memoryToast(action: string, count = 0): string {
 export function memoryButtonLabel(count: number): string {
   return count > 0 ? `Memória · ${count}` : "Memória";
 }
+
+/** Clima (Fase 8): o que o cartão mostra, a partir do estado enviado pelo servidor (cache). */
+export interface WeatherInfo {
+  available: boolean;
+  summary?: string;
+  detail?: string;
+  message?: string;
+  updated_at?: number | null;
+  stale?: boolean;
+  status?: string;
+}
+
+export function weatherCardText(w: WeatherInfo): string {
+  if (!w.available || !w.summary) return w.message ? `Sem dados · ${w.message}` : "Sem dados";
+  return w.detail ? `${w.summary} · ${w.detail}` : w.summary;
+}
+
+/** Linha "Atualizado às…" do cartão. Distingue a hora da consulta à fonte da hora da previsão, avisa quando os
+ *  dados estão antigos e quando a última resposta veio do cache por falta de internet. */
+export function weatherUpdatedLabel(w: WeatherInfo, now: Date = new Date()): string {
+  if (!w.available || w.updated_at == null) return "Sem dados — nunca atualizado";
+  const then = new Date(w.updated_at * 1000);
+  const hhmm = then.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const sameDay = then.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  let when: string;
+  if (sameDay) when = `às ${hhmm}`;
+  else if (then.toDateString() === yesterday.toDateString()) when = `ontem às ${hhmm}`;
+  else when = `em ${then.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} às ${hhmm}`;
+  let label = `${w.stale ? "Dados antigos · atualizado" : "Atualizado"} ${when}`;
+  if (w.status === "offline") label += " · sem internet, usando dados salvos";
+  return label;
+}

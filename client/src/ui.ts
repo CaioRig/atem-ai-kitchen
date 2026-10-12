@@ -73,11 +73,11 @@ export class Panel {
     this.reply.classList.toggle("partial", !final);
   }
 
-  setWeather(text: string, updatedAt: Date | null): void {
+  /** Cartão "Clima": resumo, linha de atualização (hora da consulta à fonte) e destaque quando os dados estão antigos. */
+  setWeather(text: string, updatedLabel: string, stale = false): void {
     this.weatherText.textContent = text;
-    this.weatherUpdated.textContent = updatedAt
-      ? `Atualizado às ${this.timeFmt.format(updatedAt)}`
-      : "Sem dados — nunca atualizado";
+    this.weatherUpdated.textContent = updatedLabel;
+    this.weatherUpdated.classList.toggle("stale", stale);
   }
 
   setConnection(view: ConnectionView, extra = ""): void {
