@@ -206,6 +206,7 @@ export function resolveToken(hash: string, stored: string | null): { token: stri
 export const MEMORY_KIND_LABELS: Record<string, string> = {
   preference: "Preferência",
   kitchen: "Cozinha",
+  ingredient: "Ingrediente",
   instruction: "Instrução",
   note: "Lembrete",
 };
@@ -233,6 +234,12 @@ export function memoryToast(action: string, count = 0): string {
       return "Nada parecido na memória";
     case "error":
       return "Memória indisponível";
+    case "stock_saved":
+      return "Ingredientes registrados";
+    case "stock_updated":
+      return "Ingredientes atualizados";
+    case "stock_removed":
+      return "Ingredientes removidos";
     default:
       return "";
   }

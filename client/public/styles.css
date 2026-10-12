@@ -146,6 +146,18 @@ body {
 .card.grow {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Receitas (Fase 7): o texto preserva as quebras de linha (ingredientes e passos numerados) e rola
+   dentro do cartão quando não cabe; o visual do cartão não muda. */
+.card.grow .text {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  white-space: pre-line;
+  scrollbar-width: thin;
 }
 
 .label {
@@ -293,6 +305,7 @@ button.pill:focus-visible {
 .kind-kitchen { color: #7cff9a; }
 .kind-instruction { color: #ffd166; }
 .kind-note { color: #d19aff; }
+.kind-ingredient { color: #ffb86b; }
 
 .memory-text {
   font-size: clamp(15px, 1.4vw, 20px);

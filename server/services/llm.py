@@ -52,12 +52,18 @@ class LanguageModel(Protocol):
     name: str
 
     def reply(
-        self, text: str, on_delta: DeltaHandler | None = None, cancel: threading.Event | None = None, context: str = ""
+        self,
+        text: str,
+        on_delta: DeltaHandler | None = None,
+        cancel: threading.Event | None = None,
+        context: str = "",
+        max_tokens: int | None = None,
     ) -> str:
         """Texto do usuário -> resposta completa. `on_delta` recebe trechos conforme chegam
         (chamado na thread do cliente HTTP). `context` é informação adicional (p.ex. memórias
-        relevantes) anexada à instrução de sistema, nunca à fala da pessoa. Retorna "" se cancelado;
-        levanta LLMError em falhas."""
+        relevantes) anexada à instrução de sistema, nunca à fala da pessoa. `max_tokens` substitui o
+        limite padrão da resposta (p.ex. receitas completas). Retorna "" se cancelado; levanta LLMError
+        em falhas."""
         ...
 
     def check(self) -> str:
@@ -162,7 +168,12 @@ class OllamaClient:
         return f"O modelo '{self.name}' não está instalado no Ollama. No servidor, execute: ollama pull {self.name}"
 
     def reply(
-        self, text: str, on_delta: DeltaHandler | None = None, cancel: threading.Event | None = None, context: str = ""
+        self,
+        text: str,
+        on_delta: DeltaHandler | None = None,
+        cancel: threading.Event | None = None,
+        context: str = "",
+        max_tokens: int | None = None,
     ) -> str:
         text = text.strip()[:MAX_PROMPT_CHARS]
         if not text:
@@ -174,7 +185,7 @@ class OllamaClient:
             "model": self.name,
             "stream": True,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": self.temperature, "num_predict": self.max_tokens},
+            "options": {"temperature": self.temperature, "num_predict": max_tokens or self.max_tokens},
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": text},

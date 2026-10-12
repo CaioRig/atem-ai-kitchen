@@ -120,3 +120,17 @@ enabled = true
 path = "data/memory.sqlite3"
 # Maximo de memorias relevantes enviadas a IA por pergunta (as instrucoes de resposta vao sempre).
 max_context = 8
+
+[recipes]
+# Receitas e ingredientes disponiveis (Fase 7), tudo com a mesma IA local e a mesma memoria. Ver docs/receitas.md.
+# "tenho tres ovos e um pacote de arroz" / "usei dois ovos" / "quais ingredientes tenho?" (estoque, sem IA, exige [memory]);
+# "o que posso fazer com ovos, arroz e tomate?" / "me ensine a fazer panqueca para duas pessoas" / "adapte essa receita
+# para quatro pessoas" (orientacao de receita, estoque e ultima receita como contexto para o Ollama).
+enabled = true
+# Limite de tokens em pedidos de receita (uma receita completa nao cabe nos 300 de [llm] max_tokens).
+max_tokens = 600
+# Receitas estruturadas maiores que isso (caracteres) sao faladas em resumo: a abertura + "os detalhes estao na tela".
+# 0 = falar tudo (ate [tts] max_chars).
+spoken_max_chars = 420
+# Por quanto tempo (s) "essa receita" / "nesta receita" se refere a ultima resposta (so em memoria do processo).
+followup_ttl_s = 1800

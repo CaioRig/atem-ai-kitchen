@@ -52,7 +52,7 @@ mono, 16 kHz, em quadros de qualquer tamanho (o cliente envia 1280 amostras =
 | `speak_end` | `id`, `samples` | último trecho da fala `id` já foi enviado; o cliente responde `speak_done` quando o último trecho terminar de tocar |
 | `speak_stop` | `id` | parar a reprodução imediatamente (nova interação, "hey Luna" durante a fala, Cancelar ou falha no meio) |
 | `speak_error` | `code`, `message`, `retry` | a voz falhou: `message` amigável para a linha de estado (o texto da resposta continua no cartão); `retry: true` habilita "Tentar novamente" (`replay`). Códigos: `engine`, `empty`, `playback` (o próprio quiosque não conseguiu tocar), `internal` |
-| `memory` | `action`, `count`, `item?`, `previous?`, `items?`, `topic?`, `spoken?`, `message?` | memória persistente (`docs/memoria.md`): `saved`, `updated` (com `previous`), `exists`, `deleted`, `cleared`, `kept`, `not_found`, `confirm_clear` (a Luna pediu confirmação por voz), `list` (`items`; `spoken: true` quando pedida por voz; `topic` quando filtrada) e `error` (`message`). `count` é o total após a ação. Broadcast, exceto `list`/`not_found` pedidos pela tela |
+| `memory` | `action`, `count`, `item?`, `previous?`, `items?`, `topic?`, `spoken?`, `message?` | memória persistente (`docs/memoria.md`): `saved`, `updated` (com `previous`), `exists`, `deleted`, `cleared`, `kept`, `not_found`, `confirm_clear` (a Luna pediu confirmação por voz), `list` (`items`; `spoken: true` quando pedida por voz; `topic` quando filtrada) e `error` (`message`). Ingredientes disponíveis (`docs/receitas.md`): `stock_saved`, `stock_updated`, `stock_removed` (`items` alterados; `item.kind = "ingredient"`) e `list` com `topic: "ingredientes disponíveis"`. `count` é o total após a ação. Broadcast, exceto `list`/`not_found` pedidos pela tela |
 | `error` | `code`, `message` | erro não fatal (`bad_message`, `forbidden`, `busy`, `bad_audio`, `unavailable`, `confirm_required`) |
 
 ## Estados do assistente (servidor)
@@ -91,9 +91,12 @@ Mapeamento para o rosto (cliente):
    `done_hold_s`). Em falha: `reply_error` e `idle` com "Não consegui responder"; o cliente pode
    enviar `retry`. "Nada reconhecido" nunca chega à IA.
    **Comandos de memória** ("lembre que…", "o que você lembra…", "esqueça que…", "apague todas as
-   memórias" e o "sim"/"não" da confirmação) são resolvidos no servidor sem a IA: `thinking` → `reply`
+   memórias" e o "sim"/"não" da confirmação) e **de ingredientes** ("tenho três ovos", "usei dois ovos",
+   "quais ingredientes tenho?") são resolvidos no servidor sem a IA: `thinking` → `reply`
    final + `memory` → fala (se houver voz) → `idle` "Pronta". As demais perguntas recebem as memórias
-   relevantes como contexto na instrução de sistema (`docs/memoria.md`).
+   relevantes como contexto na instrução de sistema (`docs/memoria.md`); perguntas sobre receitas recebem
+   também a orientação de receitas, o estoque e a última receita (`docs/receitas.md`), e receitas longas são
+   faladas em resumo (o texto completo vai no `reply`).
 6. **Com voz** (`[tts]`), após o `reply` final: `synthesizing` ("Preparando a voz…") → `speak_start` +
    primeiro trecho binário → `speaking` ("Falando") → demais trechos → `speak_end` → o cliente toca tudo
    e responde `speak_done` → `idle` com "Pronta". Sem `speak_done` em (duração do áudio + 3 s), volta a
