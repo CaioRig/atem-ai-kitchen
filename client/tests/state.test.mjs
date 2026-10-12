@@ -149,3 +149,21 @@ test("ingredientes (fase 7): tipo na lista e avisos das ações de estoque", () 
   assert.equal(memoryToast("stock_removed"), "Ingredientes removidos");
   assert.equal(memoryToast("list"), "");
 });
+
+test("clima (fase 8): texto do cartão e linha de atualização distinguem consulta, dados antigos e offline", async () => {
+  const { weatherCardText, weatherUpdatedLabel } = await import("../public/js/state.js");
+  assert.equal(weatherCardText({ available: false }), "Sem dados");
+  assert.equal(weatherCardText({ available: false, message: "Não consegui acessar a internet." }), "Sem dados · Não consegui acessar a internet.");
+  assert.equal(weatherCardText({ available: true, summary: "23 °C · nublado", detail: "mín 15 °C · máx 27 °C" }), "23 °C · nublado · mín 15 °C · máx 27 °C");
+  assert.equal(weatherUpdatedLabel({ available: false }), "Sem dados — nunca atualizado");
+  assert.equal(weatherUpdatedLabel({ available: true, updated_at: null }), "Sem dados — nunca atualizado");
+  const now = new Date(2026, 9, 12, 16, 0, 0);
+  const at = (d, h, m) => new Date(2026, 9, d, h, m, 0).getTime() / 1000;
+  assert.equal(weatherUpdatedLabel({ available: true, updated_at: at(12, 14, 32) }, now), "Atualizado às 14:32");
+  assert.equal(weatherUpdatedLabel({ available: true, updated_at: at(11, 9, 5) }, now), "Atualizado ontem às 09:05");
+  assert.equal(weatherUpdatedLabel({ available: true, updated_at: at(9, 9, 5), stale: true }, now), "Dados antigos · atualizado em 09/10 às 09:05");
+  assert.equal(
+    weatherUpdatedLabel({ available: true, updated_at: at(12, 14, 32), status: "offline" }, now),
+    "Atualizado às 14:32 · sem internet, usando dados salvos",
+  );
+});

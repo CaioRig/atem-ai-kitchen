@@ -20,6 +20,8 @@ mono, 16 kHz, em quadros de qualquer tamanho (o cliente envia 1280 amostras =
    desativada (`reason` explica); a transcrição continua funcionando (`docs/ia-local.md`).
    `memory: {available, reason, count}` descreve a memória persistente (`docs/memoria.md`);
    `available = false` significa que o arquivo SQLite não abriu ou `[memory] enabled = false`.
+   `weather: {enabled, available, location, summary, detail, updated_at, stale, status, message, source, attribution, …}`
+   descreve a previsão do tempo a partir do cache local (`docs/clima.md`); o `welcome` nunca consulta a fonte.
 
 ## Cliente → servidor
 
@@ -53,6 +55,7 @@ mono, 16 kHz, em quadros de qualquer tamanho (o cliente envia 1280 amostras =
 | `speak_stop` | `id` | parar a reprodução imediatamente (nova interação, "hey Luna" durante a fala, Cancelar ou falha no meio) |
 | `speak_error` | `code`, `message`, `retry` | a voz falhou: `message` amigável para a linha de estado (o texto da resposta continua no cartão); `retry: true` habilita "Tentar novamente" (`replay`). Códigos: `engine`, `empty`, `playback` (o próprio quiosque não conseguiu tocar), `internal` |
 | `memory` | `action`, `count`, `item?`, `previous?`, `items?`, `topic?`, `spoken?`, `message?` | memória persistente (`docs/memoria.md`): `saved`, `updated` (com `previous`), `exists`, `deleted`, `cleared`, `kept`, `not_found`, `confirm_clear` (a Luna pediu confirmação por voz), `list` (`items`; `spoken: true` quando pedida por voz; `topic` quando filtrada) e `error` (`message`). Ingredientes disponíveis (`docs/receitas.md`): `stock_saved`, `stock_updated`, `stock_removed` (`items` alterados; `item.kind = "ingredient"`) e `list` com `topic: "ingredientes disponíveis"`. `count` é o total após a ação. Broadcast, exceto `list`/`not_found` pedidos pela tela |
+| `weather` | `available`, `location`, `summary`, `detail`, `updated_at`, `observed_at`, `period_start`, `period_end`, `stale`, `status`, `message`, `source`, `attribution` | previsão do tempo (`docs/clima.md`) após cada pergunta sobre o tempo: `summary`/`detail` vão para o cartão "Clima"; `updated_at` é a hora (epoch) da consulta à fonte e `observed_at` a hora local a que as condições se referem; `stale: true` quando os dados passaram da validade longa; `status` ∈ `online` (fonte consultada agora), `cache` (dentro da validade), `offline` (fonte falhou, usando o cache; `message` explica), `none` (nada disponível), `cached_only` (pergunta sobre o próprio cache). Broadcast |
 | `error` | `code`, `message` | erro não fatal (`bad_message`, `forbidden`, `busy`, `bad_audio`, `unavailable`, `confirm_required`) |
 
 ## Estados do assistente (servidor)
@@ -97,6 +100,10 @@ Mapeamento para o rosto (cliente):
    relevantes como contexto na instrução de sistema (`docs/memoria.md`); perguntas sobre receitas recebem
    também a orientação de receitas, o estoque e a última receita (`docs/receitas.md`), e receitas longas são
    faladas em resumo (o texto completo vai no `reply`).
+   **Perguntas sobre o tempo** ("como está o tempo?", "vai chover hoje?", "como estará o tempo amanhã?", "previsão para os
+   próximos três dias", "você tem uma previsão salva?", "quando o tempo foi atualizado?") também não vão à IA: `thinking` →
+   consulta à Open-Meteo em uma thread (só se o cache venceu) → `reply` final + `weather` → fala curta → `idle` "Pronta". Sem
+   internet, a resposta sai do cache com a idade dos dados (`docs/clima.md`); nunca gera `reply_error`.
 6. **Com voz** (`[tts]`), após o `reply` final: `synthesizing` ("Preparando a voz…") → `speak_start` +
    primeiro trecho binário → `speaking` ("Falando") → demais trechos → `speak_end` → o cliente toca tudo
    e responde `speak_done` → `idle` com "Pronta". Sem `speak_done` em (duração do áudio + 3 s), volta a

@@ -48,6 +48,42 @@ export interface MemoryStatus {
   count: number;
 }
 
+/** Previsão do tempo (Fase 8), sempre a partir do cache do servidor (o `welcome` nunca consulta a fonte). */
+export interface WeatherStatus {
+  enabled: boolean;
+  available: boolean;
+  reason?: string;
+  location: string;
+  summary?: string;
+  detail?: string;
+  /** Epoch (s) da última consulta bem-sucedida à fonte; null = nunca. Não é a hora a que a previsão se refere. */
+  updated_at?: number | null;
+  stale?: boolean;
+  status?: WeatherSource;
+  message?: string;
+  source?: string;
+  attribution?: string;
+}
+
+/** De onde veio a última resposta: `online` (fonte consultada agora), `cache` (dentro da validade), `offline`
+ *  (fonte falhou; usando o cache), `none` (nada disponível) ou `cached_only` (pergunta sobre o próprio cache). */
+export type WeatherSource = "online" | "cache" | "offline" | "none" | "cached_only";
+
+/** Resposta a uma pergunta sobre o tempo: atualiza o cartão "Clima" em todos os clientes. */
+export interface WeatherMsg {
+  type: "weather";
+  available: boolean;
+  location: string;
+  summary: string;
+  detail: string;
+  updated_at: number | null;
+  stale: boolean;
+  status: WeatherSource;
+  message: string;
+  source: string;
+  attribution?: string;
+}
+
 export type MemoryKind = "preference" | "kitchen" | "ingredient" | "instruction" | "note";
 
 export interface MemoryItem {
@@ -98,6 +134,7 @@ export interface WelcomeMsg {
   llm?: LlmStatus;
   tts?: TtsStatus;
   memory?: MemoryStatus;
+  weather?: WeatherStatus;
   debug: boolean;
   state: ServerState;
   detail: string;
@@ -183,6 +220,7 @@ export type ServerMsg =
   | SpeakEndMsg
   | SpeakStopMsg
   | SpeakErrorMsg
-  | MemoryMsg;
+  | MemoryMsg
+  | WeatherMsg;
 
 export const PROTOCOL_VERSION = 1;

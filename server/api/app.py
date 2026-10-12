@@ -36,13 +36,16 @@ from server.assistant.recipes import RecipeAssistant
 from server.assistant.speech import Speech
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
+from server.assistant.weather import WeatherAssistant
 from server.services.llm import LanguageModel, OllamaClient
 from server.services.transcriber import Transcriber, TranscriberUnavailable, WhisperCppTranscriber
 from server.services.tts import KokoroSynthesizer, PiperSynthesizer, Synthesizer, TtsUnavailable
 from server.services.vad import SileroVad, SpeechDetector, VadUnavailable
 from server.services.wakeword import Detector, OpenWakeWordDetector, WakeWordUnavailable
+from server.services.weather import OpenMeteoClient, WeatherSource
 from server.storage.config import Settings
 from server.storage.memory import MemoryStorageError, MemoryStore
+from server.storage.weather import WeatherCache, WeatherCacheError
 
 log = logging.getLogger("jarvis.api")
 
@@ -204,6 +207,52 @@ def load_memory(settings: Settings) -> tuple[MemoryStore | None, str]:
         return None, f"falha ao abrir a memória: {type(exc).__name__}"
 
 
+def load_weather(settings: Settings, source: WeatherSource | None = None) -> tuple[WeatherAssistant | None, str]:
+    """Previsão do tempo (Fase 8): fonte Open-Meteo + cache no SQLite da memória. Sem conexão ainda: a fonte só é
+    consultada quando alguém pergunta. Se o cache não abrir, a Luna responde só online (e avisa no log)."""
+    if not settings.weather_enabled:
+        log.info("previsao do tempo desativada (weather.enabled = false)")
+        return None, "previsão do tempo desativada (weather.enabled = false)"
+    if source is None:
+        try:
+            source = OpenMeteoClient(
+                settings.weather_latitude,
+                settings.weather_longitude,
+                location_name=settings.weather_location_name,
+                tz_name=settings.weather_timezone,
+                forecast_days=settings.weather_forecast_days,
+                connect_timeout_s=settings.weather_connect_timeout_s,
+                timeout_s=settings.weather_timeout_s,
+            )
+        except ValueError as exc:
+            log.warning("previsao do tempo indisponivel: %s", exc)
+            return None, f"previsão do tempo indisponível: {exc}"
+    cache: WeatherCache | None
+    try:
+        cache = WeatherCache(settings.weather_cache_file)
+    except WeatherCacheError as exc:
+        log.warning("cache do tempo indisponivel (so consultas online): %s", exc)
+        cache = None
+    assistant = WeatherAssistant(
+        source,
+        cache,
+        latitude=settings.weather_latitude,
+        longitude=settings.weather_longitude,
+        location_name=settings.weather_location_name,
+        tz_name=settings.weather_timezone,
+        current_ttl_s=settings.weather_current_ttl_s,
+        forecast_ttl_s=settings.weather_forecast_ttl_s,
+        stale_after_s=settings.weather_stale_after_s,
+        retry_cooldown_s=settings.weather_retry_cooldown_s,
+    )
+    log.info(
+        "previsao do tempo: %s (%.4f, %.4f, %s) via %s; cache em %s",
+        settings.weather_location_name, settings.weather_latitude, settings.weather_longitude, settings.weather_timezone,
+        source.name, cache.path if cache is not None else "(indisponível)",
+    )
+    return assistant, ""
+
+
 def create_app(
     settings: Settings,
     detector: Detector | None = None,
@@ -212,6 +261,7 @@ def create_app(
     vad: SpeechDetector | None = None,
     synthesizer: Synthesizer | None = None,
     memory: MemoryStore | None = None,
+    weather_source: WeatherSource | None = None,
 ) -> FastAPI:
     hub = Hub()
     machine = StateMachine(AssistantState.BOOTING)
@@ -230,6 +280,7 @@ def create_app(
         synthesizer, tts_reason = load_synthesizer(settings)
     if memory is None:
         memory, memory_reason = load_memory(settings)
+    weather, weather_reason = load_weather(settings, weather_source)
 
     async def on_transcript(text: str) -> None:
         await hub.broadcast({"type": "transcript", "text": text, "final": True})
@@ -245,6 +296,10 @@ def create_app(
 
     async def on_memory(event: dict) -> None:
         """Confirmação de memória salva/apagada (ou lista pedida por voz) para todos os clientes."""
+        await hub.broadcast(event)
+
+    async def on_weather(event: dict) -> None:
+        """Cartão "Clima" da interface: resumo, hora da última atualização e aviso de dados antigos."""
         await hub.broadcast(event)
 
     # Voz: o texto e sintetizado aqui e reproduzido no quiosque. Sequencia por fala: `speak_start`,
@@ -304,6 +359,8 @@ def create_app(
         memory=memory_commands,
         on_memory=on_memory,
         recipes=recipes,
+        weather=weather,
+        on_weather=on_weather,
     )
 
     pipeline = VoicePipeline(
@@ -385,6 +442,21 @@ def create_app(
             "stock_failures": recipes.ingredients.failures if recipes.ingredients else 0,
         }
 
+    def weather_info(with_path: bool = False) -> dict:
+        """Estado do tempo a partir do cache (nunca consulta a fonte): `welcome` e `/health`."""
+        if weather is None:
+            return {"enabled": False, "available": False, "reason": weather_reason, "location": settings.weather_location_name}
+        info = weather.snapshot()
+        info["reason"] = ""
+        info["timezone"] = settings.weather_timezone
+        if with_path:
+            info["cache_path"] = str(weather.cache.path) if weather.cache is not None else ""
+            info["cache_failures"] = weather.cache_failures
+            info["current_ttl_s"] = settings.weather_current_ttl_s
+            info["forecast_ttl_s"] = settings.weather_forecast_ttl_s
+            info["stale_after_s"] = settings.weather_stale_after_s
+        return info
+
     async def check_llm() -> None:
         """Verificação inicial (servidor e modelo), sem bloquear a inicialização nem o áudio."""
         if llm is None:
@@ -418,6 +490,8 @@ def create_app(
         await machine.set(AssistantState.OFFLINE, "desligando")
         if memory is not None:
             memory.close()
+        if weather is not None and weather.cache is not None:
+            weather.cache.close()
 
     app = FastAPI(title="Jarvis Kitchen", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
@@ -427,6 +501,7 @@ def create_app(
     app.state.conversation = conversation
     app.state.speech = speech
     app.state.memory = memory
+    app.state.weather = weather
 
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -442,6 +517,7 @@ def create_app(
                 "tts": tts_info(),
                 "memory": memory_info(with_path=True),
                 "recipes": recipes_info(),
+                "weather": weather_info(with_path=True),
                 "audio_frames": pipeline.frames,
                 "wakes": pipeline.wakes,
                 "transcripts": pipeline.transcripts,
@@ -456,6 +532,7 @@ def create_app(
                 "last_reply_s": round(conversation.last_reply_s, 2),
                 "memory_commands": conversation.memory_replies,
                 "memory_failures": memory_commands.failures if memory_commands else 0,
+                "weather_replies": conversation.weather_replies,
                 "spoken": speech.spoken,
                 "speech_failures": speech.failures,
                 "last_synthesis_s": round(speech.last_synthesis_s, 2),
@@ -486,6 +563,7 @@ def create_app(
                     "llm": llm_info(),
                     "tts": tts_info(),
                     "memory": memory_info(),
+                    "weather": weather_info(),
                     **machine.snapshot(),
                 }
             )

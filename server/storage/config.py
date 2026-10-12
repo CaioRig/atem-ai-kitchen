@@ -80,6 +80,21 @@ class Settings:
     recipes_max_tokens: int = 600  # limite de tokens para receitas completas (o padrao [llm] max_tokens e curto)
     recipes_spoken_max_chars: int = 420  # receitas maiores que isso sao faladas em resumo; 0 = falar tudo
     recipes_followup_ttl_s: float = 1800.0  # por quanto tempo "essa receita" se refere a ultima resposta
+    # Previsao do tempo (Fase 8): Open-Meteo (gratuita, sem chave) para Ouro Fino, MG, com cache persistente no
+    # mesmo SQLite da memoria e funcionamento offline a partir do cache. Nenhum dado pessoal sai da maquina.
+    weather_enabled: bool = True
+    weather_latitude: float = -22.28306
+    weather_longitude: float = -46.36889
+    weather_location_name: str = "Ouro Fino, MG"
+    weather_timezone: str = "America/Sao_Paulo"
+    weather_forecast_days: int = 5  # dias de previsao pedidos a fonte (1..16)
+    weather_connect_timeout_s: float = 5.0
+    weather_timeout_s: float = 10.0
+    weather_current_ttl_s: float = 1800.0  # condicoes atuais valem 30 min sem nova consulta
+    weather_forecast_ttl_s: float = 10800.0  # previsao dos proximos dias vale 3 h sem nova consulta
+    weather_stale_after_s: float = 21600.0  # acima disso, dados do cache sao anunciados como desatualizados
+    weather_retry_cooldown_s: float = 60.0  # apos uma falha, espera isso antes de tentar a fonte de novo
+    weather_cache_path: Path | None = None  # None = mesmo arquivo de [memory] path
 
     @property
     def tls_enabled(self) -> bool:
@@ -135,6 +150,31 @@ class Settings:
                 raise ConfigError("recipes.spoken_max_chars nao pode ser negativo (0 = falar tudo)")
             if self.recipes_followup_ttl_s <= 0:
                 raise ConfigError("recipes.followup_ttl_s deve ser maior que zero")
+        if self.weather_enabled:
+            if not -90.0 <= self.weather_latitude <= 90.0 or not -180.0 <= self.weather_longitude <= 180.0:
+                raise ConfigError("weather.latitude/longitude fora do intervalo valido (-90..90, -180..180)")
+            if not self.weather_location_name.strip():
+                raise ConfigError("weather.location_name vazio")
+            if not self.weather_timezone.strip() or "/" not in self.weather_timezone:
+                raise ConfigError("weather.timezone deve ser um nome IANA (ex.: America/Sao_Paulo)")
+            if not 1 <= self.weather_forecast_days <= 16:
+                raise ConfigError("weather.forecast_days deve estar entre 1 e 16")
+            if self.weather_connect_timeout_s <= 0 or self.weather_timeout_s <= 0:
+                raise ConfigError("weather.connect_timeout_s e weather.timeout_s devem ser maiores que zero")
+            if self.weather_current_ttl_s <= 0 or self.weather_forecast_ttl_s <= 0 or self.weather_stale_after_s <= 0:
+                raise ConfigError("weather.current_ttl_s, forecast_ttl_s e stale_after_s devem ser maiores que zero")
+            if self.weather_retry_cooldown_s < 0:
+                raise ConfigError("weather.retry_cooldown_s nao pode ser negativo")
+
+    @property
+    def weather_cache_file(self) -> Path:
+        """Arquivo do cache do tempo: o configurado; senão o SQLite da memoria (mesmo banco, tabela separada); com a
+        memoria desativada, um arquivo proprio ao lado, para nao criar o banco da memoria sem ela estar em uso."""
+        if self.weather_cache_path is not None:
+            return self.weather_cache_path
+        if self.memory_enabled:
+            return self.memory_path
+        return self.memory_path.with_name("weather.sqlite3")
 
     @classmethod
     def from_toml(cls, path: Path) -> "Settings":
@@ -154,6 +194,7 @@ class Settings:
         tts = raw.get("tts", {})
         mem = raw.get("memory", {})
         recipes = raw.get("recipes", {})
+        weather = raw.get("weather", {})
         models_dir = PROJECT_ROOT / "models" / "openwakeword"
         tts_engine = str(tts.get("engine", "kokoro")).strip().lower()
         tts_default_model = "models/tts/pt_BR-faber-medium.onnx" if tts_engine == "piper" else "models/tts/kokoro-v1.0.onnx"
@@ -211,6 +252,19 @@ class Settings:
             recipes_max_tokens=int(recipes.get("max_tokens", 600)),
             recipes_spoken_max_chars=int(recipes.get("spoken_max_chars", 420)),
             recipes_followup_ttl_s=float(recipes.get("followup_ttl_s", 1800.0)),
+            weather_enabled=bool(weather.get("enabled", True)),
+            weather_latitude=float(weather.get("latitude", -22.28306)),
+            weather_longitude=float(weather.get("longitude", -46.36889)),
+            weather_location_name=str(weather.get("location_name", "Ouro Fino, MG")).strip(),
+            weather_timezone=str(weather.get("timezone", "America/Sao_Paulo")).strip(),
+            weather_forecast_days=int(weather.get("forecast_days", 5)),
+            weather_connect_timeout_s=float(weather.get("connect_timeout_s", 5.0)),
+            weather_timeout_s=float(weather.get("timeout_s", 10.0)),
+            weather_current_ttl_s=float(weather.get("current_ttl_s", 1800.0)),
+            weather_forecast_ttl_s=float(weather.get("forecast_ttl_s", 10800.0)),
+            weather_stale_after_s=float(weather.get("stale_after_s", 21600.0)),
+            weather_retry_cooldown_s=float(weather.get("retry_cooldown_s", 60.0)),
+            weather_cache_path=optional_path(weather.get("cache_path")),
         )
 
 
