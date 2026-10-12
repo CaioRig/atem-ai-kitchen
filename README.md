@@ -1,4 +1,4 @@
-# Atem (Jarvis Kitchen)
+# Atem (Luna Kitchen)
 
 Assistente pessoal por voz, local e offline, para a cozinha. Interface de rosto
 pixelado em tela cheia no computador da cozinha e servidor de IA
