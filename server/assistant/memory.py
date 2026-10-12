@@ -143,10 +143,14 @@ def strip_wake_prefix(text: str) -> str:
     return text[m.end():].strip() if m else text
 
 
-def _strip_polite(text: str) -> str:
+def strip_polite_prefix(text: str) -> str:
+    """Remove "por favor", "você pode", "quero que você" do início da frase."""
     folded = fold(text)
     m = _POLITE_PREFIX.match(folded)
     return text[m.end():].strip() if m else text
+
+
+_strip_polite = strip_polite_prefix
 
 
 def _clean_body(body: str) -> str:
@@ -168,7 +172,9 @@ def classify(body: str) -> str:
 
 def _kind_from_topic(topic: str) -> str | None:
     folded = fold(topic)
-    if re.search(r"\b(?:cozinha|equipamentos?|utensilios?|eletrodomesticos?|ingredientes?|despensa|panelas?)\b", folded):
+    if re.search(r"\b(?:ingredientes?|despensa|estoque|mantimentos)\b", folded):
+        return "ingredient"
+    if re.search(r"\b(?:cozinha|equipamentos?|utensilios?|eletrodomesticos?|panelas?)\b", folded):
         return "kitchen"
     if re.search(r"\b(?:preferencias?|gostos?|comidas?|alimentos?|alimentacao|o que (?:eu )?gosto|o que (?:eu )?nao gosto|alergias?)\b", folded):
         return "preference"
@@ -366,6 +372,7 @@ class MemoryCommands:
             about = {
                 "kitchen": "a sua cozinha",
                 "preference": "as suas preferências",
+                "ingredient": "os seus ingredientes",
                 "instruction": "como devo responder",
                 "note": "os seus lembretes",
             }[intent.kind]

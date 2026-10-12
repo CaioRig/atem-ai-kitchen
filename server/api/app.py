@@ -30,7 +30,9 @@ from server.api.protocol import (
     parse_inbound,
 )
 from server.assistant.conversation import Conversation
+from server.assistant.ingredients import IngredientCommands
 from server.assistant.memory import REPLY_STORAGE_FAILED, MemoryCommands
+from server.assistant.recipes import RecipeAssistant
 from server.assistant.speech import Speech
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
@@ -279,6 +281,18 @@ def create_app(
     # Memoria: com [memory] enabled, os comandos por voz sao interpretados mesmo se o arquivo nao abriu
     # (a Luna explica que a memoria esta indisponivel). Desativada, nada e interpretado.
     memory_commands = MemoryCommands(memory, max_context=settings.memory_max_context) if settings.memory_enabled else None
+    # Receitas e ingredientes (Fase 7): os comandos de estoque usam a mesma memoria; a orientacao de receitas
+    # e a fala resumida funcionam mesmo sem memoria. Desativado com [recipes] enabled = false.
+    recipes = (
+        RecipeAssistant(
+            IngredientCommands(memory) if settings.memory_enabled else None,
+            max_tokens=settings.recipes_max_tokens,
+            spoken_max_chars=settings.recipes_spoken_max_chars,
+            followup_ttl_s=settings.recipes_followup_ttl_s,
+        )
+        if settings.recipes_enabled
+        else None
+    )
 
     conversation = Conversation(
         machine,
@@ -289,6 +303,7 @@ def create_app(
         speaker=speech if speech.available else None,
         memory=memory_commands,
         on_memory=on_memory,
+        recipes=recipes,
     )
 
     pipeline = VoicePipeline(
@@ -350,6 +365,26 @@ def create_app(
                 info["path"] = str(memory.path)
         return info
 
+    def recipes_info() -> dict:
+        if recipes is None:
+            return {"enabled": False}
+        ingredients = 0
+        if memory is not None:
+            try:
+                ingredients = memory.count("ingredient")
+            except MemoryStorageError:
+                ingredients = 0
+        return {
+            "enabled": True,
+            "ingredients": ingredients,
+            "recipe_requests": recipes.recipe_requests,
+            "followups": recipes.followups,
+            "spoken_summaries": recipes.summaries,
+            "recent_recipe": recipes.has_recent_recipe,
+            "stock_commands": recipes.ingredients.commands if recipes.ingredients else 0,
+            "stock_failures": recipes.ingredients.failures if recipes.ingredients else 0,
+        }
+
     async def check_llm() -> None:
         """Verificação inicial (servidor e modelo), sem bloquear a inicialização nem o áudio."""
         if llm is None:
@@ -406,6 +441,7 @@ def create_app(
                 "llm": llm_info(),
                 "tts": tts_info(),
                 "memory": memory_info(with_path=True),
+                "recipes": recipes_info(),
                 "audio_frames": pipeline.frames,
                 "wakes": pipeline.wakes,
                 "transcripts": pipeline.transcripts,

@@ -48,7 +48,7 @@ export interface MemoryStatus {
   count: number;
 }
 
-export type MemoryKind = "preference" | "kitchen" | "instruction" | "note";
+export type MemoryKind = "preference" | "kitchen" | "ingredient" | "instruction" | "note";
 
 export interface MemoryItem {
   id: number;
@@ -68,7 +68,11 @@ export type MemoryAction =
   | "not_found"
   | "confirm_clear"
   | "list"
-  | "error";
+  | "error"
+  /** Ingredientes disponíveis (Fase 7): registrados, quantidades atualizadas ou itens tirados da lista. */
+  | "stock_saved"
+  | "stock_updated"
+  | "stock_removed";
 
 /** Mudança ou consulta da memória persistente (por voz ou pela tela). `count` é o total após a ação. */
 export interface MemoryMsg {

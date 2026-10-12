@@ -13,13 +13,14 @@ na rede local.
 - Voz da Luna (Kokoro-82M `pf_dora`, feminina pt-BR, sintetizada no servidor e reproduzida na cozinha): `docs/voz.md`
 - Memória local persistente (SQLite em `data/memory.sqlite3`; "Luna, lembre que…", "o que você lembra?", "esqueça que…", "apague todas as memórias" com confirmação; painel "Memória" na tela): `docs/memoria.md`
 - Palavra de ativacao: "hey Luna" em uso; treino do modelo "hey Atem" (pronuncia "ei-tem"): `docs/palavra-de-ativacao.md`
+- Receitas e ingredientes disponíveis (Fase 7: "o que posso fazer com ovos, arroz e tomate?", "me ensine a fazer panqueca para duas pessoas", "adapte essa receita para quatro", "tenho três ovos e um pacote de arroz", "usei dois ovos", "quais ingredientes tenho?"; estoque na mesma memória SQLite; receitas longas faladas em resumo): `docs/receitas.md`
 
 ## Estrutura
 
 ```
 client/            interface (HTML, CSS, TypeScript, Canvas 2D)
 server/api/        FastAPI + WebSocket
-server/assistant/  estados (state.py), fluxo de audio/ativacao (voice.py), conversa com a IA (conversation.py), fala (speech.py) e comandos de memoria (memory.py)
+server/assistant/  estados (state.py), fluxo de audio/ativacao (voice.py), conversa com a IA (conversation.py), fala (speech.py), comandos de memoria (memory.py), ingredientes disponiveis (ingredients.py) e assistente de receitas (recipes.py)
 server/services/   wakeword.py (openWakeWord), transcriber.py (whisper.cpp), llm.py (Ollama), tts.py (Kokoro/Piper); clima, midia (fase 6)
 server/tools/      comandos permitidos (fase 6)
 server/storage/    configuracao (config.py) e memoria persistente SQLite (memory.py)
@@ -43,6 +44,7 @@ IA local: instale o Ollama no servidor, `ollama pull qwen2.5:7b` e confira com
 `.\.venv\Scripts\python scripts\check_llm.py` (configuracao em `[llm]`; ver `docs/ia-local.md`).
 Voz: confira com `.\.venv\Scripts\python scripts\check_tts.py` (configuracao em `[tts]`; ver `docs/voz.md`).
 Memoria: confira com `.\.venv\Scripts\python scripts\check_memory.py` (cenario completo em um banco temporario; configuracao em `[memory]`; ver `docs/memoria.md`).
+Receitas e ingredientes: confira com `.\.venv\Scripts\python scripts\check_recipes.py` (estoque, receita, porcoes, substituicao e seguranca alimentar com a IA real, em um banco temporario; configuracao em `[recipes]`; ver `docs/receitas.md`).
 
 Abra no computador da cozinha: `https://<ip-do-servidor>:8800/#token=<token>`
 (o token fica em `config/settings.toml`; o fragmento `#` nao e enviado ao servidor).

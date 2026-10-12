@@ -2,9 +2,12 @@
 
 Cada pergunta é independente (sem histórico de conversa). A memória persistente (Fase 6) entra de
 duas formas: comandos como "lembre que..." são resolvidos aqui mesmo, sem a IA, por
-`MemoryCommands`; perguntas comuns recebem as memórias relevantes como contexto. A chamada HTTP
-roda em uma thread; o loop asyncio continua livre para o áudio e o WebSocket. Trechos da resposta
-são repassados conforme chegam (`on_reply(texto, final=False)`) e o texto completo no fim.
+`MemoryCommands`; perguntas comuns recebem as memórias relevantes como contexto. A Fase 7 acrescenta,
+pelo mesmo caminho, os comandos de ingredientes disponíveis ("tenho três ovos", "usei dois ovos") e,
+nas perguntas sobre receitas, a orientação de receitas, o estoque e a última receita como contexto
+(`RecipeAssistant`), além de falar só um resumo quando a resposta é longa. A chamada HTTP roda em uma
+thread; o loop asyncio continua livre para o áudio e o WebSocket. Trechos da resposta são repassados
+conforme chegam (`on_reply(texto, final=False)`) e o texto completo no fim.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Awaitable, Callable
 
 from server.assistant.memory import MemoryCommands, MemoryOutcome
+from server.assistant.recipes import RecipeAssistant
 from server.assistant.speech import Speech
 from server.assistant.state import AssistantState, StateMachine
 from server.services.llm import LanguageModel, LLMError
@@ -47,6 +51,7 @@ class Conversation:
         speaker: Speech | None = None,
         memory: MemoryCommands | None = None,
         on_memory: MemoryEventHandler | None = None,
+        recipes: RecipeAssistant | None = None,
     ) -> None:
         self.machine = machine
         self.llm = llm
@@ -56,6 +61,7 @@ class Conversation:
         self.speaker = speaker  # voz: fala a resposta completa (synthesizing -> speaking -> idle)
         self.memory = memory  # memoria persistente: comandos por voz e contexto para a IA
         self.on_memory = on_memory
+        self.recipes = recipes  # receitas e ingredientes: comandos de estoque, contexto e fala resumida
         self.memory_replies = 0
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm") if llm else None
         self._task: asyncio.Task | None = None
@@ -70,7 +76,7 @@ class Conversation:
 
     @property
     def available(self) -> bool:
-        return self.llm is not None or self.memory is not None
+        return self.llm is not None or self.memory is not None or self.recipes is not None
 
     @property
     def busy(self) -> bool:
@@ -94,8 +100,9 @@ class Conversation:
             return False
         if prompt_id is not None:
             self._last_prompt_id = prompt_id
-        # Comandos de memoria ("lembre que...", "o que voce lembra...") sao resolvidos aqui, sem a IA.
-        outcome = self.memory.handle(text) if self.memory is not None else None
+        # Comandos locais, sem a IA: a confirmacao pendente de "apague tudo" tem prioridade; depois os
+        # comandos de ingredientes ("tenho tres ovos", "usei dois ovos") e os de memoria ("lembre que...").
+        outcome = self._local_outcome(text)
         if outcome is not None:
             self._retry_text = None
             self._cancel_hold()
@@ -121,6 +128,16 @@ class Conversation:
         text = self._retry_text or ""
         log.info("nova tentativa de resposta")
         return await self.ask(text)
+
+    def _local_outcome(self, text: str) -> MemoryOutcome | None:
+        outcome: MemoryOutcome | None = None
+        if self.memory is not None and self.memory.awaiting_confirmation:
+            outcome = self.memory.handle(text)  # "sim"/"nao"; qualquer outra frase cancela o pedido
+        if outcome is None and self.recipes is not None:
+            outcome = self.recipes.handle(text)
+        if outcome is None and self.memory is not None:
+            outcome = self.memory.handle(text)
+        return outcome
 
     async def cancel(self) -> bool:
         if self._task is None:
@@ -168,12 +185,18 @@ class Conversation:
         def on_delta(piece: str) -> None:  # thread do cliente HTTP
             loop.call_soon_threadsafe(queue.put_nowait, piece)
 
-        # So as memorias relevantes para esta pergunta (e as instrucoes de resposta) vao como contexto.
-        context = self.memory.context_for(text) if self.memory is not None else ""
+        # So as memorias relevantes para esta pergunta (e as instrucoes de resposta) vao como contexto;
+        # em perguntas sobre receitas, tambem a orientacao de receitas, o estoque e a ultima receita.
+        parts = [self.memory.context_for(text) if self.memory is not None else ""]
+        limit: int | None = None
+        if self.recipes is not None:
+            parts.append(self.recipes.context_for(text))
+            limit = self.recipes.max_tokens_for(text)
+        context = "\n\n".join(p for p in parts if p)
 
         def worker() -> str:
             try:
-                return self.llm.reply(text, on_delta, cancel, context=context)  # type: ignore[union-attr]
+                return self.llm.reply(text, on_delta, cancel, context=context, max_tokens=limit)  # type: ignore[union-attr]
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
@@ -211,8 +234,13 @@ class Conversation:
         self.last_error = None
         log.info("resposta em %.2f s: %d caracteres", self.last_reply_s, len(reply))  # o texto nao vai ao log
         await self._emit(reply, final=True)
-        # Com voz, a resposta e falada e a propria fala volta a espera ("Pronta") ao terminar.
-        if self.speaker is not None and await self.speaker.speak(reply):
+        # Com voz, a resposta e falada e a propria fala volta a espera ("Pronta") ao terminar. Receitas
+        # longas sao faladas em resumo (abertura + aviso); o texto completo ja esta na tela.
+        spoken = reply
+        if self.recipes is not None:
+            spoken = self.recipes.spoken_text(reply, text)
+            self.recipes.remember_reply(text, reply)
+        if self.speaker is not None and await self.speaker.speak(spoken):
             return
         await self._idle(DETAIL_READY)
 

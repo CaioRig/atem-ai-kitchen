@@ -27,6 +27,7 @@
 | `kitchen` (cozinha) | "tenho uma air fryer", "não tenho forno", "comprei uma panela de pressão" | equipamentos, utensílios, ingredientes, "tenho um/uma…" |
 | `instruction` (instrução) | "responda sempre em frases curtas", "me chame de Caio" | fala sobre como a Luna deve responder (tem prioridade) |
 | `note` (lembrete) | "o aniversário da Ana é dia 20" | tudo o mais que a pessoa pedir para guardar |
+| `ingredient` (ingrediente) | "ovos: 3 unidades", "arroz: 1 pacote" | estoque da Fase 7 ("tenho três ovos", "usei dois ovos"); texto gerado pela Luna, ver `docs/receitas.md` |
 
 A classificação é automática pelo conteúdo (`classify()`); o tipo aparece na tela e pode ser conferido
 com "o que você lembra sobre minha cozinha / minhas preferências / meus lembretes".

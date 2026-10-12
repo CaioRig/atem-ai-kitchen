@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { Backoff, MOODS, audioError, canCancel, displayMood, idleStatus, micLabel, moodFor, moodLabel, resolveToken, statusText } from "../public/js/state.js";
+import { Backoff, MOODS, audioError, canCancel, displayMood, idleStatus, memoryKindLabel, memoryToast, micLabel, moodFor, moodLabel, resolveToken, statusText } from "../public/js/state.js";
 
 test("todo rosto tem um nome em pt-BR para o indicador", () => {
   for (const mood of MOODS) {
@@ -140,4 +140,12 @@ test("memória: rótulos dos tipos, avisos e botão", async () => {
   assert.equal(memoryToast("confirm_clear"), "");
   assert.equal(memoryButtonLabel(0), "Memória");
   assert.equal(memoryButtonLabel(4), "Memória · 4");
+});
+
+test("ingredientes (fase 7): tipo na lista e avisos das ações de estoque", () => {
+  assert.equal(memoryKindLabel("ingredient"), "Ingrediente");
+  assert.equal(memoryToast("stock_saved"), "Ingredientes registrados");
+  assert.equal(memoryToast("stock_updated"), "Ingredientes atualizados");
+  assert.equal(memoryToast("stock_removed"), "Ingredientes removidos");
+  assert.equal(memoryToast("list"), "");
 });

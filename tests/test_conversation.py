@@ -42,14 +42,16 @@ class FakeLLM:
         self.delay_s = delay_s
         self.calls: list[str] = []
         self.contexts: list[str] = []  # contexto (memorias) recebido em cada chamada
+        self.limits: list[int | None] = []  # max_tokens recebido em cada chamada (receitas)
         self.aborted = False
 
     def check(self) -> str:
         return self.error.message if self.error else ""
 
-    def reply(self, text, on_delta=None, cancel=None, context="") -> str:
+    def reply(self, text, on_delta=None, cancel=None, context="", max_tokens=None) -> str:
         self.calls.append(text)
         self.contexts.append(context)
+        self.limits.append(max_tokens)
         if self.error:
             raise self.error
         out = []
@@ -155,7 +157,7 @@ async def test_failure_reports_friendly_error_and_retry_works():
 @pytest.mark.anyio
 async def test_unexpected_exception_does_not_crash():
     class Broken(FakeLLM):
-        def reply(self, text, on_delta=None, cancel=None, context=""):
+        def reply(self, text, on_delta=None, cancel=None, context="", max_tokens=None):
             raise RuntimeError("bug")
 
     machine, conv, _, seen, replies, errors = make_conversation(Broken())
@@ -381,7 +383,7 @@ def test_thread_safe_delta_from_other_thread():
     calls: list[str] = []
 
     class Threaded(FakeLLM):
-        def reply(self, text, on_delta=None, cancel=None, context=""):
+        def reply(self, text, on_delta=None, cancel=None, context="", max_tokens=None):
             t = threading.Thread(target=lambda: [on_delta(p) for p in self.pieces])
             t.start()
             t.join()

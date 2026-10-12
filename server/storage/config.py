@@ -74,6 +74,12 @@ class Settings:
     memory_enabled: bool = True
     memory_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "memory.sqlite3")
     memory_max_context: int = 8  # maximo de memorias relevantes enviadas a IA por pergunta (alem das instrucoes)
+    # Assistente de receitas (Fase 7): orientacao extra para a IA em pedidos de receita, estoque de ingredientes
+    # no contexto, continuacao da ultima receita e fala resumida de respostas longas. Tudo local (Ollama).
+    recipes_enabled: bool = True
+    recipes_max_tokens: int = 600  # limite de tokens para receitas completas (o padrao [llm] max_tokens e curto)
+    recipes_spoken_max_chars: int = 420  # receitas maiores que isso sao faladas em resumo; 0 = falar tudo
+    recipes_followup_ttl_s: float = 1800.0  # por quanto tempo "essa receita" se refere a ultima resposta
 
     @property
     def tls_enabled(self) -> bool:
@@ -122,6 +128,13 @@ class Settings:
                 raise ConfigError("tts.voice vazio: informe a voz do Kokoro (ex.: pf_dora)")
         if self.memory_enabled and self.memory_max_context <= 0:
             raise ConfigError("memory.max_context deve ser maior que zero")
+        if self.recipes_enabled:
+            if self.recipes_max_tokens <= 0:
+                raise ConfigError("recipes.max_tokens deve ser maior que zero")
+            if self.recipes_spoken_max_chars < 0:
+                raise ConfigError("recipes.spoken_max_chars nao pode ser negativo (0 = falar tudo)")
+            if self.recipes_followup_ttl_s <= 0:
+                raise ConfigError("recipes.followup_ttl_s deve ser maior que zero")
 
     @classmethod
     def from_toml(cls, path: Path) -> "Settings":
@@ -140,6 +153,7 @@ class Settings:
         llm = raw.get("llm", {})
         tts = raw.get("tts", {})
         mem = raw.get("memory", {})
+        recipes = raw.get("recipes", {})
         models_dir = PROJECT_ROOT / "models" / "openwakeword"
         tts_engine = str(tts.get("engine", "kokoro")).strip().lower()
         tts_default_model = "models/tts/pt_BR-faber-medium.onnx" if tts_engine == "piper" else "models/tts/kokoro-v1.0.onnx"
@@ -193,6 +207,10 @@ class Settings:
             memory_enabled=bool(mem.get("enabled", True)),
             memory_path=PROJECT_ROOT / str(mem.get("path", "data/memory.sqlite3")),
             memory_max_context=int(mem.get("max_context", 8)),
+            recipes_enabled=bool(recipes.get("enabled", True)),
+            recipes_max_tokens=int(recipes.get("max_tokens", 600)),
+            recipes_spoken_max_chars=int(recipes.get("spoken_max_chars", 420)),
+            recipes_followup_ttl_s=float(recipes.get("followup_ttl_s", 1800.0)),
         )
 
 

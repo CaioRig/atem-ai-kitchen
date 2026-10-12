@@ -1,8 +1,10 @@
 """Memória local persistente da Luna (SQLite, biblioteca padrão).
 
 Guarda só o que a pessoa pediu para lembrar: preferências alimentares, informações da cozinha,
-instruções de resposta e lembretes informativos. Nada de áudio, nada de histórico de conversa.
-O arquivo fica em `data/memory.sqlite3` (configurável em `[memory] path`) e nunca sai da máquina.
+instruções de resposta, lembretes informativos e, desde a Fase 7, os ingredientes disponíveis
+(tipo `ingredient`, na mesma tabela: "ovos: 3 unidades"). Nada de áudio, nada de histórico de
+conversa. O arquivo fica em `data/memory.sqlite3` (configurável em `[memory] path`) e nunca sai
+da máquina.
 
 Todas as operações passam por `MemoryStore`; qualquer falha do SQLite vira `MemoryStorageError`,
 para quem chama tratar sem derrubar o servidor. A tabela tem uma coluna `profile` para separar
@@ -22,19 +24,23 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.memory")
 
-KINDS = ("preference", "kitchen", "instruction", "note")
+KINDS = ("preference", "kitchen", "ingredient", "instruction", "note")
 KIND_LABELS = {
     "preference": "preferência",
     "kitchen": "cozinha",
+    "ingredient": "ingrediente",
     "instruction": "instrução",
     "note": "lembrete",
 }
 KIND_LABELS_PLURAL = {
     "preference": "preferências",
     "kitchen": "cozinha",
+    "ingredient": "ingredientes",
     "instruction": "instruções",
     "note": "lembretes",
 }
+INGREDIENT_KIND = "ingredient"
+UNKNOWN_QUANTITY = "quantidade não informada"  # texto guardado quando a pessoa não disse quanto tem
 DEFAULT_PROFILE = "default"
 MAX_TEXT_CHARS = 300
 MAX_ROWS = 500  # limite de segurança: a memória é de uma casa, não um banco de dados
@@ -138,6 +144,127 @@ def _has_negation(norm: str) -> bool:
     return "nao" in norm.split()
 
 
+# -- ingredientes ---------------------------------------------------------------------------------
+# Um ingrediente é uma memória do tipo `ingredient` cujo texto tem a forma "nome: quantidade", p.ex.
+# "ovos: 3 unidades", "arroz: 1 pacote", "carne moída: 500 gramas", "tomate: quantidade não informada".
+# O texto é gerado por `format_ingredient()` e lido de volta por `parse_ingredient()`; a identidade do
+# ingrediente é `ingredient_key()` (nome no singular, sem acentos), para "ovos" e "ovo" serem o mesmo.
+
+_INVARIANT_PLURALS = frozenset("pires lapis onibus atlas virus tenis cais ananas oasis simples".split())
+_KEY_CONNECTORS = frozenset("de da do das dos com sem em e a o para pra".split())
+_INGREDIENT_TEXT = re.compile(r"^(?P<name>[^:]+):\s*(?P<rest>.+)$")
+_QUANTITY_TEXT = re.compile(r"^(?P<qty>\d+(?:[.,]\d+)?)\s+(?P<unit>.+)$")
+
+
+def singular(word: str) -> str:
+    """Singular aproximado em pt-BR, preservando acentos: ovos->ovo, limões->limão, pães->pão,
+    nozes->noz, cereais->cereal, atuns->atum. Palavras curtas e invariáveis não mudam."""
+    w = word
+    low = fold(w)
+    if len(w) <= 3 or not low.endswith("s") or low in _INVARIANT_PLURALS:
+        return w
+    if low.endswith(("oes", "aes")):
+        return w[:-3] + "ão"
+    if low.endswith("ais"):
+        return w[:-3] + "al"
+    if low.endswith("eis"):
+        return w[:-3] + "el"
+    if low.endswith("ois"):
+        return w[:-3] + "ol"
+    if low.endswith(("res", "zes", "nes", "ses")) and len(w) > 4:
+        return w[:-2]
+    if low.endswith("ns"):
+        return w[:-2] + "m"
+    return w[:-1]
+
+
+def ingredient_key(name: str) -> str:
+    """Chave de identidade de um ingrediente: palavras no singular, sem acentos nem pontuação."""
+    words = [singular(w) if w not in _KEY_CONNECTORS else w for w in normalize(name).split()]
+    return " ".join(w for w in words if w)
+
+
+def format_quantity(quantity: float | None, unit: str | None) -> str:
+    """"3 unidades", "1 pacote", "0,5 quilo", "quantidade não informada"."""
+    if quantity is None:
+        return UNKNOWN_QUANTITY
+    qty = _number_text(quantity)
+    unit = (unit or "unidade").strip()
+    return f"{qty} {plural_unit(unit, quantity)}"
+
+
+def format_ingredient(name: str, quantity: float | None, unit: str | None) -> str:
+    name = " ".join(name.split()).strip(" .,;:!?").lower()
+    return f"{name}: {format_quantity(quantity, unit)}"
+
+
+def parse_ingredient(text: str) -> tuple[str, float | None, str | None]:
+    """Texto guardado -> (nome, quantidade, unidade). Quantidade None = não informada."""
+    m = _INGREDIENT_TEXT.match(" ".join(text.split()))
+    if not m:
+        return " ".join(text.split()), None, None
+    name = m.group("name").strip()
+    rest = m.group("rest").strip()
+    q = _QUANTITY_TEXT.match(rest)
+    if not q:
+        return name, None, None
+    quantity = float(q.group("qty").replace(",", "."))
+    unit = singular_unit(q.group("unit").strip())
+    return name, quantity, (None if unit == "unidade" else unit)
+
+
+def singular_unit(unit: str) -> str:
+    """"colheres de sopa" -> "colher de sopa"; "gramas" -> "grama"."""
+    head, sep, tail = unit.strip().partition(" ")
+    return f"{singular(head)}{sep}{tail}"
+
+
+def _number_text(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def plural_unit(unit: str, quantity: float) -> str:
+    """"unidade"/"unidades", "grama"/"gramas", "colher de sopa"/"colheres de sopa" conforme a quantidade
+    (até 1, inclusive frações como meio litro, fica no singular)."""
+    unit = unit.strip()
+    if quantity <= 1 or not unit:
+        return unit
+    head, sep, tail = unit.partition(" ")
+    return f"{_pluralize_word(head)}{sep}{tail}"
+
+
+def _pluralize_word(word: str) -> str:
+    low = fold(word)
+    if low in _INVARIANT_PLURALS or low.endswith("s"):
+        return word
+    if low.endswith("ao"):
+        return word[:-2] + "ões"
+    if low.endswith("m"):
+        return word[:-1] + "ns"
+    if low.endswith(("r", "z", "n")):
+        return word + "es"
+    if low.endswith("l"):
+        return word[:-1] + "is"
+    return word + "s"
+
+
+_CREATE_TABLE = f"""
+    CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile TEXT NOT NULL DEFAULT 'default',
+        kind TEXT NOT NULL CHECK (kind IN ({", ".join(f"'{k}'" for k in KINDS)})),
+        text TEXT NOT NULL,
+        normalized TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        UNIQUE (profile, normalized)
+    )
+"""
+_CREATE_INDEX = "CREATE INDEX IF NOT EXISTS memories_profile_kind ON memories (profile, kind)"
+
+
 class MemoryStore:
     """Operações seguras sobre a tabela `memories`. Uma conexão, protegida por lock (o servidor é
     assíncrono em uma thread, mas a loja também é usada por scripts)."""
@@ -154,23 +281,30 @@ class MemoryStore:
             with self._conn:
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA synchronous=NORMAL")
-                self._conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS memories (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        profile TEXT NOT NULL DEFAULT 'default',
-                        kind TEXT NOT NULL CHECK (kind IN ('preference', 'kitchen', 'instruction', 'note')),
-                        text TEXT NOT NULL,
-                        normalized TEXT NOT NULL,
-                        created_at REAL NOT NULL,
-                        updated_at REAL NOT NULL,
-                        UNIQUE (profile, normalized)
-                    )
-                    """
-                )
-                self._conn.execute("CREATE INDEX IF NOT EXISTS memories_profile_kind ON memories (profile, kind)")
+                self._conn.execute(_CREATE_TABLE)
+                self._conn.execute(_CREATE_INDEX)
+            self._migrate_kinds()
         except (sqlite3.Error, OSError) as exc:
             raise MemoryStorageError(f"não foi possível abrir a memória em {self.path}: {exc}") from exc
+
+    def _migrate_kinds(self) -> None:
+        """Bancos criados antes da Fase 7 têm um CHECK sem o tipo `ingredient`. O SQLite não altera
+        restrições no lugar: a tabela é recriada com a lista atual, preservando ids e dados."""
+        row = self._conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memories'").fetchone()
+        current = str(row["sql"]) if row else ""
+        if all(f"'{kind}'" in current for kind in KINDS):
+            return
+        log.info("memoria: atualizando o esquema para os tipos %s", ", ".join(KINDS))
+        with self._conn:
+            self._conn.execute("DROP INDEX IF EXISTS memories_profile_kind")
+            self._conn.execute("ALTER TABLE memories RENAME TO memories_old")
+            self._conn.execute(_CREATE_TABLE)
+            self._conn.execute(
+                "INSERT INTO memories (id, profile, kind, text, normalized, created_at, updated_at) "
+                "SELECT id, profile, kind, text, normalized, created_at, updated_at FROM memories_old"
+            )
+            self._conn.execute("DROP TABLE memories_old")
+            self._conn.execute(_CREATE_INDEX)
 
     def close(self) -> None:
         with self._lock:
@@ -322,6 +456,55 @@ class MemoryStore:
                 cur = self._conn.execute("DELETE FROM memories WHERE profile = ?", (self.profile,))
             n = cur.rowcount
         log.info("%d memorias apagadas", n)
+        return n
+
+    # -- ingredientes disponíveis (mesma tabela, tipo `ingredient`) --------------------------------
+
+    def ingredients(self) -> list[Memory]:
+        """Estoque registrado, na ordem em que foi informado."""
+        return self.all(INGREDIENT_KIND)
+
+    def find_ingredient(self, name: str) -> Memory | None:
+        """Ingrediente cujo nome tem a mesma chave ("ovos" encontra "ovo: 2 unidades")."""
+        key = ingredient_key(name)
+        if not key:
+            return None
+        for mem in self.ingredients():
+            stored, _, _ = parse_ingredient(mem.text)
+            if ingredient_key(stored) == key:
+                return mem
+        return None
+
+    def set_ingredient(self, name: str, quantity: float | None, unit: str | None) -> tuple[Memory, str, Memory | None]:
+        """Registra ou atualiza a quantidade de um ingrediente. Retorna (memória, status, anterior) com
+        status "created" ou "updated" (o nome passa a ser como foi dito por último)."""
+        text = format_ingredient(name, quantity, unit)
+        previous = self.find_ingredient(name)
+        if previous is None:
+            mem, status, _ = self.add(INGREDIENT_KIND, text)
+            return mem, "created" if status == "created" else "updated", None
+        if previous.text == text:
+            return previous, "exists", previous
+        updated = self.update(previous.id, text)
+        if updated is None:  # apagado entre a busca e a atualização (pela tela): registra de novo
+            mem, _, _ = self.add(INGREDIENT_KIND, text)
+            return mem, "created", None
+        return updated, "updated", previous
+
+    def remove_ingredient(self, name: str) -> Memory | None:
+        mem = self.find_ingredient(name)
+        if mem is None or not self.remove(mem.id):
+            return None
+        return mem
+
+    def clear_ingredients(self) -> int:
+        with self._guard():
+            with self._conn:
+                cur = self._conn.execute(
+                    "DELETE FROM memories WHERE profile = ? AND kind = ?", (self.profile, INGREDIENT_KIND)
+                )
+            n = cur.rowcount
+        log.info("%d ingredientes apagados", n)
         return n
 
     # -- interno -------------------------------------------------------------------------------
