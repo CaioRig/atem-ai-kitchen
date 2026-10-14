@@ -13,7 +13,7 @@ na rede local.
 - Voz da Luna (Kokoro-82M `pf_dora`, feminina pt-BR, sintetizada no servidor e reproduzida na cozinha): `docs/voz.md`
 - Memória local persistente (SQLite em `data/memory.sqlite3`; "Luna, lembre que…", "o que você lembra?", "esqueça que…", "apague todas as memórias" com confirmação; painel "Memória" na tela): `docs/memoria.md`
 - Palavra de ativacao: "hey Luna" em uso; treino do modelo "hey Atem" (pronuncia "ei-tem"): `docs/palavra-de-ativacao.md`
-- Previsão do tempo para Ouro Fino, MG (Fase 8: Open-Meteo gratuita e sem chave; "como está o tempo?", "vai chover hoje?", "como estará o tempo amanhã?", "previsão para os próximos três dias", "você tem uma previsão salva?", "quando o tempo foi atualizado?"; cache persistente no mesmo SQLite da memória, respostas offline com a idade dos dados e aviso quando antigos; cartão "Clima" na tela): `docs/clima.md`
+- Previsão do tempo (Fase 8: Open-Meteo gratuita e sem chave; "como está o tempo?", "vai chover hoje?", "como estará o tempo amanhã?", "previsão para os próximos três dias", "você tem uma previsão salva?", "quando o tempo foi atualizado?"; cache persistente no mesmo SQLite da memória, respostas offline com a idade dos dados e aviso quando antigos; cartão "Clima" na tela): `docs/clima.md`
 - Receitas e ingredientes disponíveis (Fase 7: "o que posso fazer com ovos, arroz e tomate?", "me ensine a fazer panqueca para duas pessoas", "adapte essa receita para quatro", "tenho três ovos e um pacote de arroz", "usei dois ovos", "quais ingredientes tenho?"; estoque na mesma memória SQLite; receitas longas faladas em resumo): `docs/receitas.md`
 
 ## Estrutura
