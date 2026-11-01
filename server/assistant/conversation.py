@@ -25,6 +25,7 @@ from server.assistant.screen import parse_screen
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.weather import WeatherAssistant, WeatherIntent
 from server.services.llm import LanguageModel, LLMError
+from server.services.videos import VideoSearch, video_query
 
 log = logging.getLogger("jarvis.conversation")
 
@@ -58,9 +59,12 @@ class Conversation:
         weather: WeatherAssistant | None = None,
         on_weather: WeatherEventHandler | None = None,
         on_screen: Callable[[dict], Awaitable[None]] | None = None,
+        videos: VideoSearch | None = None,
     ) -> None:
         self.machine = machine
         self.on_screen = on_screen
+        self.videos = videos
+        self.view_kind = "reply"
         self.llm = llm
         self.on_reply = on_reply
         self.on_error = on_error
@@ -129,6 +133,14 @@ class Conversation:
             return False
         if prompt_id is not None:
             self._last_prompt_id = prompt_id
+        self.view_kind = "reply"
+        query = video_query(text) if self.videos and self.on_screen else None
+        if query:
+            self._cancel_hold()
+            self._retry_text = None
+            self._task = asyncio.create_task(self._run_videos(query))
+            await asyncio.sleep(0)
+            return True
         # Comandos locais, sem a IA: a confirmacao pendente de "apague tudo" tem prioridade; depois os
         # comandos de ingredientes ("tenho tres ovos", "usei dois ovos") e os de memoria ("lembre que...").
         outcome = self._local_outcome(text)
@@ -226,6 +238,16 @@ class Conversation:
             if self._task is asyncio.current_task():
                 self._task = None
 
+    async def _run_videos(self, query: str) -> None:
+        try:
+            await self.machine.set(AssistantState.THINKING, "Procurando vídeos…")
+            event = await asyncio.to_thread(self.videos.search, query)
+            await self.on_screen(event)
+            await self._idle(DETAIL_READY)
+        finally:
+            if self._task is asyncio.current_task():
+                self._task = None
+
     async def _run(self, text: str, cancel: threading.Event) -> None:
         """Ciclo completo de uma pergunta; `busy` fica verdadeiro até o estado final ser notificado."""
         try:
@@ -236,6 +258,7 @@ class Conversation:
 
     async def _work(self, text: str, cancel: threading.Event) -> None:
         assert self.llm is not None
+        self.view_kind = "recipe" if self.recipes and self.recipes.max_tokens_for(text) else "reply"
         await self.machine.set(AssistantState.THINKING, DETAIL_THINKING)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[str | None] = asyncio.Queue()

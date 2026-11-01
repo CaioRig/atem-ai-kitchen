@@ -44,6 +44,7 @@ from server.services.vad import SileroVad, SpeechDetector, VadUnavailable
 from server.services.wakeword import Detector, OpenWakeWordDetector, WakeWordUnavailable
 from server.services.weather import OpenMeteoClient, WeatherSource
 from server.storage.config import Settings
+from server.services.videos import VideoSearch
 from server.storage.memory import MemoryStorageError, MemoryStore
 from server.storage.weather import WeatherCache, WeatherCacheError
 
@@ -288,7 +289,7 @@ def create_app(
     async def on_reply(text: str, final: bool) -> None:
         if final:
             llm_status["reason"] = ""
-        await hub.broadcast({"type": "reply", "text": text, "final": final})
+        await hub.broadcast({"type": "reply", "text": text, "final": final, "view": conversation.view_kind})
 
     async def on_reply_error(code: str, message: str) -> None:
         llm_status["reason"] = message
@@ -362,6 +363,7 @@ def create_app(
         weather=weather,
         on_weather=on_weather,
         on_screen=hub.broadcast,
+        videos=VideoSearch(),
     )
 
     pipeline = VoicePipeline(
