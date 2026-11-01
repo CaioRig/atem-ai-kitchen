@@ -365,7 +365,7 @@ async def test_without_speech_conversation_ends_with_ready():
 
 
 def ws_client(tmp_path, synth, llm=None):
-    settings = Settings(
+    settings = Settings(weather_auto_refresh=False,
         auth_token=TOKEN,
         client_dir=tmp_path,
         wake_model=tmp_path / "nao-existe.onnx",
@@ -481,7 +481,7 @@ def test_say_speaks_text_only_in_debug_mode(tmp_path):
         hello(ws)
         ws.send_json({"type": "say", "text": "Teste de voz."})
         assert ws.receive_json()["code"] == "forbidden"  # debug desligado
-    settings = Settings(
+    settings = Settings(weather_auto_refresh=False,
         auth_token=TOKEN, debug_allow_state_override=True, client_dir=tmp_path, wake_model=tmp_path / "x.onnx",
         wake_features_dir=tmp_path, wake_vad_model=tmp_path / "x.onnx", stt_model=tmp_path / "x.bin", stt_done_hold_s=0.05,
         memory_path=tmp_path / "memory.sqlite3",
@@ -500,11 +500,11 @@ def test_say_speaks_text_only_in_debug_mode(tmp_path):
 
 def test_tts_settings_validation():
     with pytest.raises(Exception, match="tts.engine"):
-        Settings(auth_token=TOKEN, tts_engine="festival").validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, tts_engine="festival").validate()
     with pytest.raises(Exception, match="tts.speed"):
-        Settings(auth_token=TOKEN, tts_speed=3.0).validate()
-    Settings(auth_token=TOKEN, tts_enabled=False, tts_engine="festival").validate()  # desativada: nao valida
-    s = Settings(auth_token=TOKEN)
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, tts_speed=3.0).validate()
+    Settings(weather_auto_refresh=False, auth_token=TOKEN, tts_enabled=False, tts_engine="festival").validate()  # desativada: nao valida
+    s = Settings(weather_auto_refresh=False, auth_token=TOKEN)
     assert s.tts_engine == "kokoro" and s.tts_voice == "pf_dora" and s.tts_model.name == "kokoro-v1.0.onnx"
 
 

@@ -82,6 +82,7 @@ class Settings:
     recipes_followup_ttl_s: float = 1800.0  # por quanto tempo "essa receita" se refere a ultima resposta
     # Previsao do tempo (Fase 8): Open-Meteo (gratuita, sem chave) para Ouro Fino, MG, com cache persistente no
     # mesmo SQLite da memoria e funcionamento offline a partir do cache. Nenhum dado pessoal sai da maquina.
+    weather_auto_refresh: bool = True
     weather_enabled: bool = True
     weather_latitude: float = -22.28306
     weather_longitude: float = -46.36889
@@ -252,6 +253,7 @@ class Settings:
             recipes_max_tokens=int(recipes.get("max_tokens", 600)),
             recipes_spoken_max_chars=int(recipes.get("spoken_max_chars", 420)),
             recipes_followup_ttl_s=float(recipes.get("followup_ttl_s", 1800.0)),
+            weather_auto_refresh=bool(weather.get("auto_refresh", True)),
             weather_enabled=bool(weather.get("enabled", True)),
             weather_latitude=float(weather.get("latitude", -22.28306)),
             weather_longitude=float(weather.get("longitude", -46.36889)),

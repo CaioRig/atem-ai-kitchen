@@ -701,6 +701,7 @@ def test_weather_voice_command_over_websocket_updates_everyone(tmp_path):
     app = create_app(
         settings_for(tmp_path), detector=FakeDetector(), transcriber=FakeTranscriber("Luna, vai chover hoje?"), llm=llm, weather_source=source
     )
+    app.state.weather._clock = lambda: NOW
     with TestClient(app) as c, c.websocket_connect("/ws") as ws, c.websocket_connect("/ws") as other:
         w = hello(ws)
         hello(other)
@@ -710,7 +711,7 @@ def test_weather_voice_command_over_websocket_updates_everyone(tmp_path):
         ws.send_bytes(silence(20))
         msgs = collect_until(ws, lambda m: m["type"] == "state" and m["state"] == "idle" and m["detail"] == DETAIL_READY)
         replies = [m for m in msgs if m["type"] == "reply"]
-        assert len(replies) == 1 and replies[0]["final"] is True and "a chance chega a" in replies[0]["text"]  # o percentual depende da hora real
+        assert len(replies) == 1 and replies[0]["final"] is True and "a chance chega a 70%" in replies[0]["text"]
         weather = [m for m in msgs if m["type"] == "weather"]
         assert len(weather) == 1 and weather[0]["available"] and weather[0]["status"] == "online" and weather[0]["summary"] == "23 °C · parcialmente nublado"
         assert weather[0]["updated_at"] is not None and weather[0]["stale"] is False and weather[0]["source"] == "fonte-falsa"
@@ -723,6 +724,7 @@ def test_weather_voice_command_over_websocket_updates_everyone(tmp_path):
         assert h["weather"]["current_ttl_s"] == 1800.0 and h["weather"]["forecast_ttl_s"] == 10800.0 and h["memory"]["available"] is True
     # Reinício do servidor: o welcome já traz o cache, sem consultar a fonte.
     app = create_app(settings_for(tmp_path), detector=FakeDetector(), transcriber=FakeTranscriber("x"), llm=llm, weather_source=FakeSource(error=OFFLINE))
+    app.state.weather._clock = lambda: NOW
     with TestClient(app) as c, c.websocket_connect("/ws") as ws:
         w = hello(ws)
         assert w["weather"]["available"] is True and w["weather"]["summary"] == "23 °C · parcialmente nublado" and w["weather"]["status"] == "cache"
@@ -747,6 +749,7 @@ def test_weather_cache_open_failure_keeps_server_running_online_only(tmp_path):
     (tmp_path / "bloqueado").mkdir()
     settings = settings_for(tmp_path, weather_cache_path=tmp_path / "bloqueado")
     app = create_app(settings, detector=FakeDetector(), transcriber=FakeTranscriber("como está o tempo?"), llm=FakeLLM(), weather_source=FakeSource())
+    app.state.weather._clock = lambda: NOW
     with TestClient(app) as c, c.websocket_connect("/ws") as ws:
         w = hello(ws)
         assert w["weather"]["enabled"] and w["weather"]["cache"] is False
@@ -771,11 +774,11 @@ def test_settings_weather_from_toml_and_validation(tmp_path):
     assert (s.weather_forecast_days, s.weather_current_ttl_s, s.weather_forecast_ttl_s, s.weather_stale_after_s, s.weather_retry_cooldown_s) == (3, 600.0, 7200.0, 3600.0, 0.0)
     assert s.weather_cache_file == PROJECT_ROOT / "data" / "clima.sqlite3"
     s.validate()
-    d = Settings(auth_token=TOKEN)
+    d = Settings(weather_auto_refresh=False, auth_token=TOKEN)
     assert (d.weather_enabled, d.weather_latitude, d.weather_longitude, d.weather_timezone) == (True, -22.28306, -46.36889, "America/Sao_Paulo")
     assert (d.weather_forecast_days, d.weather_current_ttl_s, d.weather_forecast_ttl_s, d.weather_stale_after_s, d.weather_retry_cooldown_s) == (5, 1800.0, 10800.0, 21600.0, 60.0)
     assert d.weather_cache_file == d.memory_path  # mesmo banco da memoria
-    assert Settings(auth_token=TOKEN, memory_enabled=False).weather_cache_file == PROJECT_ROOT / "data" / "weather.sqlite3"
+    assert Settings(weather_auto_refresh=False, auth_token=TOKEN, memory_enabled=False).weather_cache_file == PROJECT_ROOT / "data" / "weather.sqlite3"
     d.validate()
     for field, value, match in (
         ("weather_latitude", 95.0, "latitude"),
@@ -787,5 +790,5 @@ def test_settings_weather_from_toml_and_validation(tmp_path):
         ("weather_location_name", " ", "location_name"),
     ):
         with pytest.raises(ConfigError, match=match):
-            Settings(auth_token=TOKEN, **{field: value}).validate()
-    Settings(auth_token=TOKEN, weather_enabled=False, weather_latitude=95.0).validate()  # desativada: nao valida
+            Settings(weather_auto_refresh=False, auth_token=TOKEN, **{field: value}).validate()
+    Settings(weather_auto_refresh=False, auth_token=TOKEN, weather_enabled=False, weather_latitude=95.0).validate()  # desativada: nao valida

@@ -1,6 +1,10 @@
 # Plano e decisões técnicas — Jarvis Kitchen
 
-Documento vivo. Atualizado em 2026-10-11 (Fases 1–2 concluídas; captura de voz, palavra de ativação e transcrição offline implementadas).
+Documento vivo. Revisado em 2026-11-01. Voz, memoria, receitas/estoque e clima implementados. Validacao fisica no LG pendente; roteiro em `docs/operacao.md`.
+
+Numeracao: a tabela abaixo preserva o plano original. As entregas posteriores chamam memoria de Fase 6, receitas de Fase 7 e clima de Fase 8; isso nao significa que operacao e otimizacao estejam concluidas.
+
+Estabilizacao em 2026-11-01: dependencias do cliente restauradas com npm ci; build e 14 testes do cliente passaram. Python: 264 passaram e 3 ignorados. Teste WebSocket de clima corrigido para usar relogio fixo coerente com a previsao simulada. Ollama e modelo responderam a verificacao; arquivos dos modelos locais presentes. Script `configure-autostart.ps1` preparado e validado em modo WhatIf. Testes fisicos do LG continuam pendentes.
 
 ## 1. Inspeção do ambiente (Fase 1)
 
@@ -112,7 +116,7 @@ Nada foi alterado nele.
 | 4 Pipeline de voz | áudio do navegador → servidor; wake word; whisper.cpp; TTS; reprodução; teste com microfone real | captura (AudioWorklet → WS), wake word (openWakeWord `hey_luna`) e transcrição offline (whisper.cpp small-q8_0 no servidor, `docs/transcricao.md`) feitos e testados com microfone real nesta máquina; **4.1 (latência/precisão) feita**: transcrição 2,1 s → 0,85 s, fim da fala por Silero VAD, pré-buffer; **TTS feito** (Kokoro `pf_dora` no servidor, reprodução no navegador, `docs/voz.md`); teste no LG pendente |
 | 5 Conversação | Ollama + modelo medido (RAM/VRAM/latência); memória SQLite apagável | Ollama `qwen2.5:7b` integrado e medido (`docs/ia-local.md`); **voz da Luna feita** (`docs/voz.md`): resposta → síntese local → áudio na cozinha, interrupção por "hey Luna"/Cancelar, falhas amigáveis; **memória local feita** (`docs/memoria.md`): SQLite em `data/memory.sqlite3`, "lembre que…/o que você lembra…/esqueça que…/apague todas as memórias" (com confirmação verbal), só memórias relevantes vão à IA como contexto, painel "Memória" na tela |
 | 6 Ferramentas | clima Ouro Fino (Open-Meteo, cache), receitas SQLite, mídia local, Spotify opcional | **receitas e ingredientes feitos** (`docs/receitas.md`); **clima feito** (`docs/clima.md`): Open-Meteo sem chave, cache persistente no SQLite da memória, respostas offline com a idade dos dados; mídia e Spotify pendentes |
-| 7 Operação | serviço no Windows, quiosque Lubuntu no LG, logs rotativos, health, docs | pendente |
+| 7 Operação | inicializacao no Windows, quiosque no LG, logs rotativos, health, docs | logs rotativos e health existentes; script de tarefa no logon e roteiro preparados (`docs/operacao.md`); aceite fisico no LG pendente |
 | 8 Otimização | medições e correção de gargalos | pendente |
 
 ## 4. Riscos conhecidos

@@ -21,6 +21,7 @@ from typing import Awaitable, Callable
 from server.assistant.memory import MemoryCommands, MemoryOutcome
 from server.assistant.recipes import RecipeAssistant
 from server.assistant.speech import Speech
+from server.assistant.screen import parse_screen
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.weather import WeatherAssistant, WeatherIntent
 from server.services.llm import LanguageModel, LLMError
@@ -56,8 +57,10 @@ class Conversation:
         recipes: RecipeAssistant | None = None,
         weather: WeatherAssistant | None = None,
         on_weather: WeatherEventHandler | None = None,
+        on_screen: Callable[[dict], Awaitable[None]] | None = None,
     ) -> None:
         self.machine = machine
+        self.on_screen = on_screen
         self.llm = llm
         self.on_reply = on_reply
         self.on_error = on_error
@@ -83,7 +86,7 @@ class Conversation:
 
     @property
     def available(self) -> bool:
-        return self.llm is not None or self.memory is not None or self.recipes is not None or self.weather is not None
+        return self.on_screen is not None or self.llm is not None or self.memory is not None or self.recipes is not None or self.weather is not None
 
     @property
     def busy(self) -> bool:
@@ -102,6 +105,25 @@ class Conversation:
         if prompt_id is not None and prompt_id == self._last_prompt_id:
             log.info("transcricao %d ja processada; ignorada", prompt_id)
             return False
+        action = parse_screen(text) if self.on_screen else None
+        if action:
+            if prompt_id is not None:
+                self._last_prompt_id = prompt_id
+            self._cancel_hold()
+            if self.memory:
+                self.memory.handle("cancelar") if self.memory.awaiting_confirmation else None
+            if action == "stop":
+                await self.cancel()
+                if self.speaker:
+                    await self.speaker.cancel()
+            if not self.busy:
+                await self.machine.set(AssistantState.IDLE)
+            if action == "replay":
+                ok = self.speaker is not None and await self.speaker.replay()
+                await self.on_screen({"type": "screen", "action": "notice", "message": "Repetindo a resposta" if ok else "Não há fala disponível para repetir agora"})
+            else:
+                await self.on_screen({"type": "screen", "action": action})
+            return True
         if self._task is not None:
             log.warning("resposta em andamento; nova pergunta ignorada")
             return False

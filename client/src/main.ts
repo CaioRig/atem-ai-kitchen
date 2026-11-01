@@ -1,3 +1,5 @@
+import { ForecastPopup } from "./forecast.js";
+import { ScreenControls } from "./screen.js";
 // Ponto de entrada da interface do quiosque.
 // Sem token: modo local (interface + microfone, sem detecção), útil para demonstração.
 // Com token: conecta ao servidor via WebSocket, envia o áudio do microfone e reflete os estados.
@@ -15,6 +17,7 @@ import {
   resolveToken,
   statusText,
   weatherCardText,
+  weatherDate,
   weatherUpdatedLabel,
   type MicState,
   type Mood,
@@ -26,9 +29,11 @@ import { JarvisSocket } from "./ws.js";
 import { SpeechPlayer } from "./speaker.js";
 
 const TOKEN_KEY = "jarvis.token";
+const forecastPopup = new ForecastPopup();
 const WEATHER_KEY = "jarvis.weather";
 const MIC_KEY = "atem.mic"; // "off" desliga o microfone de forma persistente
 const DEFAULT_PHRASE = "hey Luna";
+let screenControls: ScreenControls;
 
 const DEBUG_KEYS: Record<string, ServerState> = {
   "1": "booting",
@@ -78,10 +83,19 @@ function showMood(
 
 function setupCommon(): { panel: Panel; face: PixelFace } {
   const panel = new Panel();
+  screenControls = new ScreenControls(text => panel.showToast(text));
+  document.getElementById("replay-answer")!.addEventListener("click", () => {
+    if (!location.hash && !localStorage.getItem(TOKEN_KEY)) panel.showToast("Conecte ao servidor para repetir a resposta");
+  });
   const face = new PixelFace(document.getElementById("face") as HTMLCanvasElement);
   face.start();
   panel.startClock();
   restoreWeather(panel);
+  window.setInterval(() => {
+    if (lastWeather?.date && lastWeather.date !== weatherDate(lastWeather.timezone)) {
+      panel.setWeather("Sem dados para hoje", "Aguardando atualização do clima", true);
+    }
+  }, 1000);
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "f") void document.documentElement.requestFullscreen?.();
   });
@@ -237,6 +251,9 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           serverState = msg.state;
           detail = msg.detail;
           break;
+        case "screen":
+          screenControls.execute(msg.action, msg.message);
+          break;
         case "state":
           // Nova interação: limpa o texto anterior. Em "idle" ele permanece visível.
           if (canCancel(msg.state) && !canCancel(serverState)) panel.setHeard("");
@@ -301,6 +318,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
         case "weather":
           // Resposta a uma pergunta sobre o tempo: o cartão "Clima" mostra o resumo e de quando são os dados.
           showWeather(panel, msg);
+          if (msg.forecast) forecastPopup.show(msg.forecast.text);
           break;
         case "error":
           console.warn("servidor:", msg.code, msg.message);
@@ -330,6 +348,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
     if (canCancel(serverState)) socket.send({ type: "cancel" });
   };
   panel.onCancel(cancel);
+  document.getElementById("replay-answer")!.addEventListener("click", () => {
+    if (!connected || serverState !== "idle") return panel.showToast("Aguarde a Luna ficar pronta para repetir");
+    if (!socket.send({ type: "replay" })) panel.showToast("Servidor indisponível");
+  });
   // Tentar novamente (botão ou tecla R): reenvia à IA a última pergunta que falhou ou, se foi a voz
   // que falhou, fala de novo a última resposta sem consultar a IA.
   const retry = () => {
@@ -342,7 +364,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
   const toggleMemory = () => {
     window.clearTimeout(memoryAutoClose);
     if (panel.memoryVisible) return panel.setMemoryVisible(false);
-    if (!connected || !memory.available) return;
+    if (!connected || !memory.available) return panel.showToast("Memória indisponível neste momento");
     panel.setMemoryVisible(true);
     socket.send({ type: "memory_list" });
   };
@@ -375,10 +397,14 @@ function main(): void {
 
 /** Cartão "Clima" a partir do estado do servidor; uma cópia fica no localStorage para o quiosque mostrar algo
  *  enquanto o servidor não responde (o cache de verdade é o do servidor, em data/memory.sqlite3). */
+let lastWeather: WeatherInfo | undefined;
 function showWeather(panel: Panel, w: WeatherInfo): void {
+  lastWeather = w;
   panel.setWeather(weatherCardText(w), weatherUpdatedLabel(w), Boolean(w.stale));
   try {
     const saved: WeatherInfo = {
+      date: w.date,
+      timezone: w.timezone,
       available: w.available,
       summary: w.summary,
       detail: w.detail,
@@ -400,9 +426,11 @@ function restoreWeather(panel: Panel): void {
     const saved = JSON.parse(raw) as Partial<WeatherInfo> & { text?: string; updatedAt?: string };
     if (typeof saved.available !== "boolean") {
       // formato anterior ({text, updatedAt}): mostra o texto e descarta a hora, que não distinguia consulta de previsão
-      return panel.setWeather(saved.text || "Sem dados", weatherUpdatedLabel({ available: false }));
+      return panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));
     }
-    const info: WeatherInfo = { ...saved, available: saved.available };
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: saved.timezone || "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const info: WeatherInfo = { ...saved, available: saved.available && saved.date === today, stale: true };
+    lastWeather = info;
     panel.setWeather(weatherCardText(info), weatherUpdatedLabel(info), Boolean(info.stale));
   } catch {
     panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));

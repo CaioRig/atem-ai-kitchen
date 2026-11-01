@@ -1,5 +1,32 @@
 # Previsão do tempo com cache local e funcionamento offline — Fase 8
 
+## Atualização diária e janela de previsão (2026-11-01)
+
+Com `[weather] auto_refresh = true` (padrão), o servidor verifica o clima ao iniciar
+e a cada 30 segundos. A fonte só é consultada quando o cache vence (30 minutos
+por padrão) ou a data local muda. Assim também há consulta diária, com tentativas
+controladas pelo `retry_cooldown_s` quando a internet falha. Perguntas e atualização
+automática compartilham o mesmo lock e cache. O processo encerra a tarefa ao desligar.
+
+O cartão continua mostrando hoje no fuso configurado. Observações de ontem não
+são apresentadas como atuais; se houver previsão para hoje no cache antigo, ela
+aparece com aviso. Sem cobertura, mostra indisponibilidade. O navegador também
+retira dados do dia anterior ao mudar a data, mesmo desconectado.
+
+Perguntas sobre amanhã, terça-feira, sábado ou outros dias abrem uma janela com
+data, condições, mínima/máxima e chuva quando informadas pela fonte. A resposta
+falada continua funcionando. Uma data sem cobertura recebe uma explicação.
+Nova consulta substitui a janela anterior e reinicia o prazo; Fechar ou Esc encerra.
+
+No cartão Clima, o campo **Previsão na tela (segundos)** configura a duração
+entre 1 e 300 segundos, com padrão de 15. A preferência é salva no localStorage
+do navegador (por dispositivo/perfil). Se o armazenamento estiver bloqueado,
+vale apenas durante a sessão. Não é necessário reiniciar o servidor.
+
+O evento `weather` mantém os campos do cartão de hoje e acrescenta `date` e
+`timezone`; consultas a outros dias incluem `forecast: {text}` para a janela.
+As atualizações automáticas não geram fala nem mudam o estado do assistente.
+
 ## O que foi implementado (2026-10-12)
 - **Fonte:** [Open-Meteo](https://open-meteo.com) (`server/services/weather.py`, `OpenMeteoClient`), gratuita para uso
   não comercial, sem chave nem cadastro (os termos citam explicitamente automação residencial pessoal). Dados sob

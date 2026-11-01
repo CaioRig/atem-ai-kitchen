@@ -10,11 +10,13 @@
   <body>
     <main id="app">
       <section id="stage">
+        <div class="brand">LUNA <span>Sua companhia na cozinha</span></div>
         <canvas id="face" aria-label="Rosto do assistente"></canvas>
         <div id="mood" class="mood" aria-live="polite">Inicializando</div>
         <div id="status" class="status">Inicializando…</div>
       </section>
       <aside id="panel">
+        <div id="content-scroll">
         <div id="clock">
           <div id="time">--:--</div>
           <div id="date">—</div>
@@ -34,7 +36,8 @@
           <div class="label">Resposta</div>
           <div id="reply" class="text">—</div>
         </div>
-        <div id="indicators">
+        </div>
+        <div id="indicators" aria-label="Controles da Luna">
           <span id="conn" class="pill warn">Servidor: conectando…</span>
           <button
             id="mic"
@@ -70,9 +73,21 @@
             Memória
           </button>
           <span id="offline-badge" class="pill warn">Modo offline</span>
+          <button id="replay-answer" class="pill" type="button">Repetir resposta</button>
+          <button id="settings-open" class="pill" type="button">Configurações</button>
+          <button id="home" class="pill" type="button">Tela principal</button>
+          <p id="mic-help" class="muted hidden">Microfone desligado: toque em Microfone para usar a voz.</p>
         </div>
       </aside>
     </main>
+    <section id="settings-panel" class="hidden" role="dialog" aria-labelledby="settings-title">
+      <header><h2 id="settings-title">Do seu jeito</h2><button id="settings-close" class="pill" type="button">Fechar</button></header>
+      <p>Ajustes salvos neste navegador.</p>
+      <div class="setting-row"><span>Tamanho do texto · <output id="text-size">100%</output></span><div><button id="text-smaller" class="pill" type="button" aria-label="Diminuir texto">A−</button><button id="text-larger" class="pill" type="button" aria-label="Aumentar texto">A+</button></div></div>
+      <div class="setting-row"><label for="forecast-duration">Previsão na tela</label><select id="forecast-duration"><option value="5">5 segundos</option><option value="10">10 segundos</option><option value="15" selected>15 segundos</option><option value="25">25 segundos</option><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="120">2 minutos</option><option value="300">5 minutos</option></select></div>
+      <div class="setting-row"><button id="fullscreen" class="pill" type="button">Entrar / sair de tela cheia</button><button id="visual-reset" class="pill" type="button">Restaurar visual padrão</button></div>
+      <p class="muted">Diga “hey Luna”, depois: “abra as configurações”, “feche a janela”, “role para baixo”, “aumente o tamanho do texto”, “repita a resposta” ou “pare de falar”.</p>
+    </section>
     <section id="memory-panel" class="hidden" role="dialog" aria-labelledby="memory-title">
       <header>
         <div id="memory-title" class="label">Memória da Luna</div>
@@ -95,6 +110,10 @@
           Apagar todas
         </button>
       </footer>
+    </section>
+    <section id="forecast-panel" class="hidden" role="dialog" aria-labelledby="forecast-title" aria-live="polite">
+      <header><h2 id="forecast-title">Previsão do tempo</h2><button id="forecast-close" type="button" class="pill">Fechar</button></header>
+      <p id="forecast-text"></p>
     </section>
     <div id="toast" class="toast hidden" aria-live="polite"></div>
     <script type="module" src="js/main.js"></script>

@@ -216,8 +216,8 @@ def test_settings_llm_from_toml_and_validation(tmp_path):
     assert s.llm_system_prompt == "Oi\nLuna"
     s.validate()
     with pytest.raises(ConfigError, match="llm.url"):
-        Settings(auth_token=TOKEN, llm_url="http://api.example.com").validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, llm_url="http://api.example.com").validate()
     with pytest.raises(ConfigError, match="llm.model"):
-        Settings(auth_token=TOKEN, llm_model=" ").validate()
-    Settings(auth_token=TOKEN, llm_enabled=False, llm_url="http://api.example.com").validate()  # desativada: nao valida
-    assert Settings(auth_token=TOKEN).llm_url == "http://127.0.0.1:11434"
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, llm_model=" ").validate()
+    Settings(weather_auto_refresh=False, auth_token=TOKEN, llm_enabled=False, llm_url="http://api.example.com").validate()  # desativada: nao valida
+    assert Settings(weather_auto_refresh=False, auth_token=TOKEN).llm_url == "http://127.0.0.1:11434"

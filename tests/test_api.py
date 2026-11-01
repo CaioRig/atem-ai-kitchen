@@ -17,7 +17,7 @@ def make_client(tmp_path, **overrides) -> TestClient:
         "memory_path": tmp_path / "memory.sqlite3",
     }
     opts.update(overrides)
-    settings = Settings(**opts)
+    settings = Settings(weather_auto_refresh=False, **opts)
     settings.validate()
     return TestClient(create_app(settings))
 
@@ -113,9 +113,9 @@ def test_invalid_message_returns_error_without_closing(tmp_path):
 
 def test_settings_validation_rejects_weak_token_and_wildcard_bind():
     with pytest.raises(ConfigError):
-        Settings(auth_token="curto").validate()
+        Settings(weather_auto_refresh=False, auth_token="curto").validate()
     with pytest.raises(ConfigError):
-        Settings(auth_token=TOKEN, bind_host="0.0.0.0").validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, bind_host="0.0.0.0").validate()
 
 
 def test_settings_from_toml(tmp_path):
@@ -136,15 +136,15 @@ def test_settings_tls_requires_both_files_and_existing_paths(tmp_path):
     key = tmp_path / "server.key"
     cert.write_text("cert", encoding="utf-8")
     key.write_text("key", encoding="utf-8")
-    s = Settings(auth_token=TOKEN, tls_certfile=cert, tls_keyfile=key)
+    s = Settings(weather_auto_refresh=False, auth_token=TOKEN, tls_certfile=cert, tls_keyfile=key)
     s.validate()
     assert s.tls_enabled and s.scheme == "https"
-    assert not Settings(auth_token=TOKEN).tls_enabled
-    assert Settings(auth_token=TOKEN).scheme == "http"
+    assert not Settings(weather_auto_refresh=False, auth_token=TOKEN).tls_enabled
+    assert Settings(weather_auto_refresh=False, auth_token=TOKEN).scheme == "http"
     with pytest.raises(ConfigError, match="juntos"):
-        Settings(auth_token=TOKEN, tls_certfile=cert).validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, tls_certfile=cert).validate()
     with pytest.raises(ConfigError, match="tls_keyfile nao encontrado"):
-        Settings(auth_token=TOKEN, tls_certfile=cert, tls_keyfile=tmp_path / "falta.key").validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, tls_certfile=cert, tls_keyfile=tmp_path / "falta.key").validate()
 
 
 def test_settings_from_toml_tls_paths_are_relative_to_project_root(tmp_path):

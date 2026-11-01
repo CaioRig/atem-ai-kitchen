@@ -361,6 +361,7 @@ def create_app(
         recipes=recipes,
         weather=weather,
         on_weather=on_weather,
+        on_screen=hub.broadcast,
     )
 
     pipeline = VoicePipeline(
@@ -483,7 +484,13 @@ def create_app(
         log.info("servidor pronto em %s://%s:%s", settings.scheme, settings.bind_host, settings.port)
         check_task = asyncio.create_task(check_llm())
         warm_task = asyncio.create_task(speech.warmup())
-        yield
+        weather_task = asyncio.create_task(weather.run_daily(on_weather)) if weather and settings.weather_auto_refresh else None
+        try:
+            yield
+        finally:
+            if weather_task:
+                weather_task.cancel()
+                await asyncio.gather(weather_task, return_exceptions=True)
         check_task.cancel()
         warm_task.cancel()
         await speech.stop()
@@ -656,7 +663,8 @@ async def _handle_message(
             log.warning("quiosque nao reproduziu a fala %d: %s", msg.id, msg.error or "sem detalhe")
         speech.playback_done(msg.id, msg.played, msg.error)
     elif isinstance(msg, Replay):
-        await speech.replay()
+        if not await speech.replay():
+            await ws.send_json({"type": "screen", "action": "notice", "message": "Não há fala disponível para repetir agora"})
     elif isinstance(msg, Say):
         if not settings.debug_allow_state_override:
             await ws.send_json(error("forbidden", "say desabilitado (debug_allow_state_override=false)"))

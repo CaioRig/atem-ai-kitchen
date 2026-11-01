@@ -252,6 +252,8 @@ export function memoryButtonLabel(count: number): string {
 
 /** Clima (Fase 8): o que o cartão mostra, a partir do estado enviado pelo servidor (cache). */
 export interface WeatherInfo {
+  date?: string;
+  timezone?: string;
   available: boolean;
   summary?: string;
   detail?: string;
@@ -262,8 +264,13 @@ export interface WeatherInfo {
 }
 
 export function weatherCardText(w: WeatherInfo): string {
+  if (w.date && w.date !== weatherDate(w.timezone)) return "Sem dados para hoje · aguardando atualização";
   if (!w.available || !w.summary) return w.message ? `Sem dados · ${w.message}` : "Sem dados";
   return w.detail ? `${w.summary} · ${w.detail}` : w.summary;
+}
+
+export function weatherDate(timeZone = "America/Sao_Paulo"): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
 /** Linha "Atualizado às…" do cartão. Distingue a hora da consulta à fonte da hora da previsão, avisa quando os

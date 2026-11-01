@@ -436,7 +436,7 @@ def settings_for(tmp_path, **overrides) -> Settings:
         memory_path=tmp_path / "memory.sqlite3",
     )
     opts.update(overrides)
-    settings = Settings(**opts)
+    settings = Settings(weather_auto_refresh=False, **opts)
     settings.validate()
     return settings
 
@@ -551,7 +551,7 @@ def test_settings_memory_from_toml_and_validation(tmp_path):
     s = Settings.from_toml(p)
     assert (s.memory_enabled, s.memory_path, s.memory_max_context) == (False, PROJECT_ROOT / "data" / "outra.sqlite3", 3)
     s.validate()  # desativada: max_context nao importa
-    d = Settings(auth_token=TOKEN)
+    d = Settings(weather_auto_refresh=False, auth_token=TOKEN)
     assert d.memory_enabled is True and d.memory_path == PROJECT_ROOT / "data" / "memory.sqlite3" and d.memory_max_context == 8
     with pytest.raises(ConfigError, match="max_context"):
-        Settings(auth_token=TOKEN, memory_max_context=0).validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, memory_max_context=0).validate()

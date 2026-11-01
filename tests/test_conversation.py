@@ -277,7 +277,7 @@ async def test_pipeline_cancel_during_thinking():
 
 
 def ws_client(tmp_path, llm):
-    settings = Settings(
+    settings = Settings(weather_auto_refresh=False,
         auth_token=TOKEN,
         debug_allow_state_override=True,
         client_dir=tmp_path,
@@ -361,7 +361,7 @@ def test_reply_error_and_retry_over_websocket(tmp_path):
 
 
 def test_llm_disabled_keeps_previous_flow(tmp_path):
-    settings = Settings(
+    settings = Settings(weather_auto_refresh=False,
         auth_token=TOKEN, client_dir=tmp_path, wake_model=tmp_path / "x.onnx", wake_features_dir=tmp_path,
         wake_vad_model=tmp_path / "x.onnx", listen_preroll_s=0.0,
         stt_model=tmp_path / "x.bin", stt_done_hold_s=0.05, llm_enabled=False, tts_enabled=False,

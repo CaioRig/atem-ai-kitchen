@@ -136,6 +136,7 @@ spoken_max_chars = 420
 followup_ttl_s = 1800
 
 [weather]
+auto_refresh = true # atualização automática ao iniciar, ao vencer o cache e ao mudar o dia
 # Previsao do tempo (Fase 8) para a cozinha, pela Open-Meteo (https://open-meteo.com): gratuita para uso nao
 # comercial, sem chave, dados CC BY 4.0. A Luna consulta a fonte so quando alguem pergunta e o cache nao vale mais;
 # o resultado fica no mesmo SQLite da memoria (tabela weather_cache) e continua disponivel sem internet, sempre

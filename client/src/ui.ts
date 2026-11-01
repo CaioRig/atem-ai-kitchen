@@ -89,6 +89,7 @@ export class Panel {
   }
 
   setMic(state: MicState, message = ""): void {
+    document.getElementById("mic-help")!.classList.toggle("hidden", state === "on");
     this.mic.textContent = micLabel(state, message);
     this.mic.classList.toggle("ok", state === "on");
     this.mic.classList.toggle("warn", state === "off" || state === "starting" || state === "blocked");
@@ -102,7 +103,9 @@ export class Panel {
 
   /** Botão "Cancelar": visível enquanto há captura, transcrição, resposta ou fala em andamento. */
   setCancelVisible(visible: boolean): void {
-    this.cancel.classList.toggle("hidden", !visible);
+    this.cancel.classList.remove("hidden");
+    this.cancel.disabled = !visible;
+    this.cancel.textContent = "Parar / cancelar";
   }
 
   onCancel(fn: () => void): void {
@@ -133,6 +136,7 @@ export class Panel {
   }
 
   setMemoryVisible(visible: boolean): void {
+    if (visible) document.dispatchEvent(new CustomEvent("luna:panel", { detail: "memory-panel" }));
     this.memoryPanel.classList.toggle("hidden", !visible);
     this.memoryBtn.setAttribute("aria-expanded", String(visible));
     if (!visible) this.disarmClear();

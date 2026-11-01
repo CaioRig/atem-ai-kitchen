@@ -508,12 +508,12 @@ def test_settings_recipes_from_toml_and_validation(tmp_path):
     p.write_text(f'[auth]\ntoken="{TOKEN}"\n[recipes]\nenabled=false\nmax_tokens=900\nspoken_max_chars=0\nfollowup_ttl_s=60\n', encoding="utf-8")
     s = Settings.from_toml(p)
     assert (s.recipes_enabled, s.recipes_max_tokens, s.recipes_spoken_max_chars, s.recipes_followup_ttl_s) == (False, 900, 0, 60.0)
-    d = Settings(auth_token=TOKEN)
+    d = Settings(weather_auto_refresh=False, auth_token=TOKEN)
     assert (d.recipes_enabled, d.recipes_max_tokens, d.recipes_spoken_max_chars, d.recipes_followup_ttl_s) == (True, 600, 420, 1800.0)
     d.validate()
     with pytest.raises(ConfigError, match="recipes.max_tokens"):
-        Settings(auth_token=TOKEN, recipes_max_tokens=0).validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, recipes_max_tokens=0).validate()
     with pytest.raises(ConfigError, match="spoken_max_chars"):
-        Settings(auth_token=TOKEN, recipes_spoken_max_chars=-1).validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, recipes_spoken_max_chars=-1).validate()
     with pytest.raises(ConfigError, match="followup_ttl_s"):
-        Settings(auth_token=TOKEN, recipes_followup_ttl_s=0).validate()
+        Settings(weather_auto_refresh=False, auth_token=TOKEN, recipes_followup_ttl_s=0).validate()

@@ -26,6 +26,7 @@ export class PixelFace {
   private level = 0;
   private running = false;
   private lastFrame = 0;
+  private readonly reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   private nextBlink = 2;
   private blinkUntil = 0;
   private readonly onResize = () => this.resize();
@@ -55,7 +56,7 @@ export class PixelFace {
 
   /** Intensidade 0..1 (nível do microfone ou da fala) usada em "listening"/"speaking". */
   setLevel(level: number): void {
-    this.level = Math.min(1, Math.max(0, level));
+    this.level = this.reducedMotion.matches ? 0 : Math.min(1, Math.max(0, level));
   }
 
   start(): void {
@@ -92,7 +93,7 @@ export class PixelFace {
     requestAnimationFrame(this.frame);
     if (now - this.lastFrame < 1000 / this.fps) return;
     this.lastFrame = now;
-    this.draw(now / 1000);
+    this.draw(this.reducedMotion.matches ? this.moodSince : now / 1000);
   };
 
   // ---- composição ---------------------------------------------------------

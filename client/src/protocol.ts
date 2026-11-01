@@ -71,6 +71,9 @@ export type WeatherSource = "online" | "cache" | "offline" | "none" | "cached_on
 
 /** Resposta a uma pergunta sobre o tempo: atualiza o cartão "Clima" em todos os clientes. */
 export interface WeatherMsg {
+  forecast?: { text: string };
+  date?: string;
+  timezone?: string;
   type: "weather";
   available: boolean;
   location: string;
@@ -209,6 +212,7 @@ export interface SpeakErrorMsg {
 }
 
 export type ServerMsg =
+  | { type: "screen"; action: string; message?: string }
   | WelcomeMsg
   | StateMsg
   | PongMsg

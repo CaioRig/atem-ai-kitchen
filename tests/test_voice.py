@@ -350,7 +350,7 @@ def test_audio_ctx_scales_with_audio_but_never_below_minimum():
 
 
 def ws_client(tmp_path, detector=None, transcriber=None):
-    settings = Settings(
+    settings = Settings(weather_auto_refresh=False,
         auth_token=TOKEN,
         debug_allow_state_override=True,
         client_dir=tmp_path,

@@ -2,8 +2,8 @@
 
 Nada aqui passa pela IA: a pergunta é reconhecida por regras determinísticas (`parse`) e respondida com
 os dados da fonte (`server/services/weather.py`) ou do cache persistente (`server/storage/weather.py`).
-A fonte só é consultada quando alguém pergunta e o cache já não vale (validades distintas para condições
-atuais e previsão). Se a consulta falha (sem internet, serviço fora, resposta inválida), a Luna usa o que
+A fonte é consultada automaticamente e quando alguém pergunta e o cache já não vale (validades distintas
+para condições atuais e previsão). Se a consulta falha (sem internet, serviço fora, resposta inválida), a Luna usa o que
 tem guardado, diz sempre de quando são os dados e avisa quando estão antigos; sem nada guardado, diz que
 não consegue informar o tempo sem internet. Probabilidade de chuva nunca vira certeza.
 """
@@ -204,6 +204,8 @@ class WeatherAssistant:
         self.retry_cooldown_s = retry_cooldown_s
         self._clock = clock
         self._lock = asyncio.Lock()
+        self._fallback = None
+        self._last_failure_at = None
         self.questions = 0
         self.fetches = 0
         self.fetch_failures = 0
@@ -223,7 +225,15 @@ class WeatherAssistant:
         self.questions += 1
         async with self._lock:  # uma consulta à fonte por vez
             try:
-                return await self._answer(intent)
+                outcome = await self._answer(intent)
+                if any(o != 0 for o in intent.offsets):
+                    entry = self._cached_entry()
+                    text = outcome.reply
+                    if entry and entry.data:
+                        text = self._compose(WeatherIntent("forecast", intent.offsets, True), entry.data,
+                                             self._clock(), outcome.status, None, entry)[0]
+                    outcome.event["forecast"] = {"text": text}
+                return outcome
             except Exception as exc:  # erro de programacao: nunca derruba o servidor
                 log.exception("falha inesperada ao responder sobre o tempo (%s)", intent.name)
                 text = "Algo deu errado ao consultar o tempo. Tente de novo daqui a pouco."
@@ -264,6 +274,27 @@ class WeatherAssistant:
         stale = self._is_stale(data, now)
         return WeatherOutcome(reply, spoken, self._event(data, status, stale=stale, message=error.message if error else ""), intent.name, status, fetched)
 
+    async def refresh_today(self) -> dict:
+        """Consulta diaria, serializada com as perguntas por voz."""
+        async with self._lock:
+            now = self._clock()
+            entry = self._cached_entry()
+            data = entry.data if entry and entry.has_data else None
+            if (data is not None and self._today(data, data.fetched_at) == self._today()
+                    and self._is_fresh(entry, WeatherIntent("current"), now)):
+                return self._event(data, "cache", stale=self._is_stale(data, now))
+            return (await self._answer(WeatherIntent("current"))).event
+
+    async def run_daily(self, publish) -> None:
+        while True:
+            try:
+                # Publica antes da rede para retirar imediatamente observacoes de ontem.
+                await publish({"type": "weather", **self.snapshot()})
+                await publish(await self.refresh_today())
+            except Exception:
+                log.exception("falha na atualizacao automatica do clima")
+            await asyncio.sleep(30)
+
     # -- política de atualização ------------------------------------------------------------------------
 
     def _is_fresh(self, entry: CacheEntry | None, intent: WeatherIntent, now: float) -> bool:
@@ -271,6 +302,8 @@ class WeatherAssistant:
             return False
         age = entry.age_s(now) or 0.0
         ttl = self.current_ttl_s if intent.needs_current else self.forecast_ttl_s
+        if self._today(entry.data, entry.data.fetched_at) != self._today(entry.data, now):
+            return False
         if age > ttl:
             return False
         return self._covers(entry.data, intent, now)
@@ -280,12 +313,14 @@ class WeatherAssistant:
         return all(data.day((today + timedelta(days=o)).isoformat()) is not None for o in intent.offsets[:1])
 
     def _in_cooldown(self, entry: CacheEntry | None, now: float) -> bool:
+        if self._last_failure_at is not None and now - self._last_failure_at < max(30, self.retry_cooldown_s):
+            return True
         if entry is None or entry.last_status != "failed" or entry.last_attempt_at is None or self.retry_cooldown_s <= 0:
             return False
         return (now - entry.last_attempt_at) < self.retry_cooldown_s
 
     def _is_stale(self, data: WeatherData, now: float) -> bool:
-        return (now - data.fetched_at) > self.stale_after_s
+        return (now - data.fetched_at) > self.stale_after_s or self._today(data, data.fetched_at) != self._today(data, now)
 
     async def _fetch(self) -> WeatherData:
         assert self.source is not None
@@ -311,15 +346,19 @@ class WeatherAssistant:
 
     def _cached_entry(self) -> CacheEntry | None:
         if self.cache is None:
-            return None
+            return self._fallback
         try:
-            return self.cache.get(self.latitude, self.longitude)
+            return self.cache.get(self.latitude, self.longitude) or self._fallback
         except WeatherCacheError as exc:
             self.cache_failures += 1
             log.warning("cache do tempo indisponível para leitura: %s", exc)
-            return None
+            return self._fallback
 
     def _store(self, data: WeatherData) -> CacheEntry | None:
+        self._last_failure_at = None
+        self._fallback = CacheEntry("", self.location_name, self.latitude, self.longitude,
+                                    self.tz_name, data.fetched_at, data.period_start, data.period_end,
+                                    data, data.fetched_at, "ok", "")
         if self.cache is None:
             return None
         try:
@@ -330,6 +369,7 @@ class WeatherAssistant:
             return None
 
     def _record_failure(self, exc: WeatherError, now: float) -> None:
+        self._last_failure_at = now
         if self.cache is None:
             return
         try:
@@ -427,7 +467,7 @@ class WeatherAssistant:
                 body += " " + _day_sentence(day, today)
             return body, body
         age = now - data.fetched_at
-        recent = status == "online" or age <= self.current_ttl_s
+        recent = cur.time[:10] == today.isoformat() and (status == "online" or age <= self.current_ttl_s)
         # Data e hora a que a leitura se refere (campo `time` da fonte, no fuso local), não a hora da consulta.
         ref_date, ref_time = _reference(cur.time, data)
         reference = f"{_full_date(ref_date)}, às {ref_time}"
@@ -548,6 +588,9 @@ class WeatherAssistant:
         today = self._today(data, self._clock())
         day = data.day(today.isoformat())
         cur = data.current
+        if cur is not None and cur.time[:10] != today.isoformat():
+            cur = None
+        stale = stale or self._today(data, data.fetched_at) != today
         summary = ""
         if cur is not None:
             bits = []
@@ -570,7 +613,9 @@ class WeatherAssistant:
             detail_bits.append(f"vento {_num(cur.wind_kmh)} km/h")
         return {
             "type": "weather",
-            "available": True,
+            "available": bool(summary),
+            "date": today.isoformat(),
+            "timezone": self.tz_name,
             "location": data.location_name,
             "summary": summary,
             "detail": " · ".join(detail_bits),
