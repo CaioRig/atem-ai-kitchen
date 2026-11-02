@@ -526,8 +526,11 @@ def create_app(
             compatible = [m.get("name") for m in performance.models if m.get("name")
                           and isinstance(m.get("size"), (int, float)) and 0 < m["size"] <= min(limit, budget)]
             alternatives = compatible if settings.llm_auto_model else []
+            if settings.bootstrap_managed or settings.llm_quality_cached_only:
+                alternatives, compatible = [], []  # bootstrap already selected and tested this exact configuration
             passed = await asyncio.to_thread(registry.approve_or_fallback, llm, alternatives,
-                                             allow_new=settings.llm_auto_model, compatible_names=compatible)
+                                             allow_new=settings.llm_auto_model, compatible_names=compatible,
+                                             cached_only=settings.bootstrap_managed or settings.llm_quality_cached_only)
             if not passed:
                 llm_status["reason"] = llm.approval_error
             else:

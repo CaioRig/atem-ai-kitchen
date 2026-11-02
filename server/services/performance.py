@@ -4,17 +4,19 @@ from __future__ import annotations
 import ctypes
 import ipaddress
 import json
+import logging
 import os
 import platform
 import subprocess
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
 GIB = 1024 ** 3
 PROFILES = ("automatic", "economic", "balanced", "performance")
+log = logging.getLogger("luna.hardware")
 
 
 @dataclass
@@ -34,11 +36,13 @@ class Hardware:
     acceleration_verified: bool = False
     inference_gpu_used: bool = False
     ollama_vram: int = 0
+    ollama_ram: int = 0
     acceleration: str | None = None
+    detection_limits: list[str] = field(default_factory=list)
 
 
 def hardware_key(h: Hardware) -> dict:
-    return {k: v for k, v in asdict(h).items() if k not in ("ram_available", "vram_available", "disk_free", "inference_gpu_used", "ollama_vram")}
+    return {k: v for k, v in asdict(h).items() if k not in ("ram_available", "vram_available", "disk_free", "inference_gpu_used", "ollama_vram", "ollama_ram", "detection_limits")}
 
 
 def _run(args: list[str]) -> str:
@@ -52,7 +56,7 @@ def detect_hardware() -> Hardware:
         import shutil
         h.disk_free = shutil.disk_usage(Path(__file__).resolve().parents[2]).free
     except OSError:
-        pass
+        h.detection_limits.append("Espaço livre em disco desconhecido")
     h.available_threads = h.threads
     try:
         if os.name == "nt":
@@ -106,7 +110,7 @@ def detect_hardware() -> Hardware:
                 if q != "max":
                     h.available_threads = min(h.available_threads, max(1, int(q) // int(period)))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
-        pass  # Unknown stays unknown.
+        h.detection_limits.append("Detecção de CPU/RAM parcial; recursos desconhecidos não são considerados disponíveis")
     try:
         lines = _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"]).splitlines()
         devices = [(name.strip(), int(total.strip()) * 1024 ** 2, int(free.strip()) * 1024 ** 2)
@@ -120,9 +124,25 @@ def detect_hardware() -> Hardware:
             if h.acceleration_verified:
                 h.acceleration = "CUDA Driver API inicializada; uso pelo Ollama verificado separadamente"
         except (OSError, AttributeError):
-            pass
+            h.detection_limits.append("Driver CUDA não inicializado; aceleração não confirmada")
     except (OSError, ValueError, subprocess.SubprocessError):
-        pass
+        # Inventory alone is not evidence of a usable inference backend or dedicated VRAM.
+        try:
+            if os.name == "nt":
+                names = json.loads(_run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "@(Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress"]))
+                h.gpu = "; ".join(names if isinstance(names, list) else [names]) or None
+            else:
+                names = []
+                for card in Path("/sys/class/drm").glob("card[0-9]*"):
+                    if (card / "device/vendor").is_file():
+                        names.append((card / "device/vendor").read_text().strip())
+                h.gpu = "; ".join(names) or None
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            pass
+        h.detection_limits.append("GPU/VRAM sem confirmação pelo driver NVIDIA; inferência em CPU é a opção conservadora")
+    for message in h.detection_limits:
+        log.warning(message)
     return h
 
 
@@ -259,7 +279,8 @@ class PerformancePolicy:
                     installed_manual = True
             if manual and not installed_manual:
                 client.name = manual  # preserve the explicit choice; check() reports its absence
-            elif not manual and self.settings.llm_auto_model and not self.settings.bootstrap_managed:
+            elif (not manual and self.settings.llm_auto_model and not self.settings.bootstrap_managed
+                  and not self.settings.llm_quality_cached_only):
                 client.name = choose_model(self.models, self.hardware if self.local else None,
                                            self.profile, client.name)
             selected = next((m for m in self.models if m.get("name") == client.name), {})

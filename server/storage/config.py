@@ -54,6 +54,7 @@ class Settings:
     stt_done_hold_s: float = 4.0  # tempo que "Transcricao concluida" fica na tela antes de voltar a espera
     # IA local via Ollama, na rede local (sem nuvem, sem chaves). URL e modelo vem de [llm] no TOML.
     llm_enabled: bool = True
+    llm_quality_cached_only: bool = False  # runtime-only: bootstrap already validated this configuration
     llm_url: str = "http://127.0.0.1:11434"
     llm_model: str = "qwen2.5:7b"
     llm_auto_model: bool = False  # existing TOML model choices remain manual

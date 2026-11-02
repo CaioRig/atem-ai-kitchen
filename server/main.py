@@ -1,6 +1,7 @@
 """Ponto de entrada: `python -m server.main`."""
 from __future__ import annotations
 
+import argparse
 import logging
 import logging.handlers
 import sys
@@ -25,13 +26,20 @@ def setup_logging(level: str, log_dir) -> None:
     root.handlers[:] = [console, rotating]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--without-llm", action="store_true", help="iniciar os demais serviços sem a IA nesta execução")
+    parser.add_argument("--validated-llm", action="store_true", help="exigir aprovação salva pelo inicializador, sem repetir testes")
+    args = parser.parse_args(argv)
     try:
         settings = load_settings()
     except ConfigError as exc:
         print(f"erro de configuracao: {exc}", file=sys.stderr)
         return 2
     setup_logging(settings.log_level, settings.log_dir)
+    if args.without_llm:
+        settings.llm_enabled = False
+    settings.llm_quality_cached_only = args.validated_llm
     app = create_app(settings)
     tls: dict[str, str] = {}
     if settings.tls_enabled:

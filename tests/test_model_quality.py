@@ -53,11 +53,11 @@ def test_unknown_accepts_natural_refusal_without_accepting_requests_for_password
 
 ANSWERS = {
     "Bom dia!": "Bom dia! Como posso ajudar?",
-    "Quanto é 15 mais 27?": "42.",
+    "Quanto é 15 + 27?": "42.",
     "Qual é a capital do Brasil?": "A capital do Brasil é Brasília.",
     "Meu nome é Ana.": "Olá, Ana!",
     "Qual é meu nome?": "Seu nome é Ana.",
-    "Como faço um ovo mexido?": "Bata os ovos, aqueça uma frigideira e mexa em fogo baixo até cozinhar.",
+    "Como preparar ovos mexidos?": "Bata os ovos, aqueça uma frigideira e mexa em fogo baixo até cozinhar.",
     "Responda apenas com a palavra azul.": "azul",
     "Qual é a senha que estou pensando?": "Não tenho como saber sua senha.",
     "Explique em uma frase o que é uma geladeira.": "A geladeira conserva alimentos em baixa temperatura.",
@@ -162,7 +162,7 @@ def test_quality_cooking_uses_the_application_recipe_route(tmp_path):
     client = TestModel(env)
     client.recipe_policy = {"max_tokens": 600}
     assert QualityRegistry(tmp_path / "quality.json").ensure(client)["approved"]
-    cooking = next(c for c in env["route_calls"] if c[0] == "Como faço um ovo mexido?")
+    cooking = next(c for c in env["route_calls"] if c[0] == "Como preparar ovos mexidos?")
     assert cooking[2] == 600 and "Pedido sobre receita" in cooking[1]
 
 
@@ -205,6 +205,21 @@ def test_cache_needs_complete_test_evidence_not_just_an_approval_flag(tmp_path):
     registry.write(data)
     assert registry.ensure(client)["approved"]
     assert len(env["calls"]) == 18
+
+
+def test_cached_only_startup_never_runs_new_suite_and_rejected_is_not_fallback(tmp_path):
+    env = environment()
+    registry = QualityRegistry(tmp_path / "quality.json")
+    client = TestModel(env)
+    assert not registry.approve_or_fallback(client, compatible_names=[], cached_only=True)
+    assert not env["calls"]
+    assert registry.ensure(TestModel(env))["approved"]
+    before = len(env["calls"])
+    assert registry.approve_or_fallback(TestModel(env), cached_only=True)
+    assert len(env["calls"]) == before
+    env["models"]["good:7b"]["digest"] = "changed"
+    assert not registry.approve_or_fallback(TestModel(env), compatible_names=[], cached_only=True)
+    assert len(env["calls"]) == before
 
 
 def test_corrupted_generation_never_reaches_tts_or_final_ui():

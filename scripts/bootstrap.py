@@ -8,6 +8,7 @@ import http.client
 import importlib.metadata
 import json
 import logging
+import math
 import os
 import platform
 import re
@@ -56,16 +57,43 @@ def detect_server() -> Hardware:
 def load_catalog(root: Path) -> dict:
     catalog = read_json(root / "config/model-catalog.json")
     try:
-        if (catalog.get("schema_version") != 1 or not isinstance(catalog["revision"], str)
+        if (type(catalog.get("schema_version")) is not int or catalog.get("schema_version") != 1 or not isinstance(catalog["revision"], str)
                 or not re.fullmatch(r"\d+\.\d+\.\d+", catalog["node_version"])
                 or not isinstance(catalog["models"], list) or not catalog["models"]):
             raise ValueError()
+        names = set()
         for entry in catalog["models"]:
-            if not re.fullmatch(r"[A-Za-z0-9_./:-]{1,128}", entry["name"]):
+            if not isinstance(entry, dict):
                 raise ValueError()
-            for key in ("download_bytes", "min_memory_gib", "min_threads", "context", "quality_rank"):
-                if not isinstance(entry[key], (int, float)) or not 0 < entry[key] < 10 ** 15:
+            if not isinstance(entry.get("aliases", []), list):
+                raise ValueError()
+            identifiers = [entry["name"], *entry.get("aliases", [])]
+            if any(not isinstance(n, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+", n) or n in names for n in identifiers):
+                raise ValueError()
+            names.update(identifiers)
+            if len(set(identifiers)) != len(identifiers):
+                raise ValueError()
+            for key in ("download_bytes", "min_memory_gib", "recommended_memory_gib", "min_vram_gib",
+                        "recommended_vram_gib", "gpu_system_memory_gib", "min_threads", "context", "quality_rank", "performance_rank"):
+                if type(entry[key]) not in (int, float) or not math.isfinite(entry[key]) or not 0 < entry[key] < 10 ** 15:
                     raise ValueError()
+            for key in ("cpu_supported", "gpu_supported", "chat", "portuguese", "automatic_allowed"):
+                if type(entry[key]) is not bool:
+                    raise ValueError()
+            for key in ("source", "upstream"):
+                if not isinstance(entry[key], str):
+                    raise ValueError()
+                source = urlsplit(entry[key])
+                if source.scheme != "https" or source.hostname not in ("ollama.com", "huggingface.co", "github.com") or source.username:
+                    raise ValueError()
+            for key in ("family", "quantization", "license", "restrictions", "display_name"):
+                if not isinstance(entry[key], str) or not entry[key].strip():
+                    raise ValueError()
+            if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry["verified_at"])
+                    or entry["context"] > 32768 or entry["context"] != int(entry["context"])
+                    or entry["recommended_memory_gib"] < entry["min_memory_gib"]
+                    or entry["recommended_vram_gib"] < entry["min_vram_gib"]):
+                raise ValueError()
     except (ValueError, KeyError, TypeError):
         raise BootstrapError("Catálogo de modelos inválido ou incompatível; restaure config/model-catalog.json") from None
     return catalog
@@ -378,15 +406,21 @@ def update_acceleration(hardware: Hardware, url: str, model: str | None = None) 
     try:
         running = api(url, "/api/ps").get("models", [])
         hardware.ollama_vram = sum(m.get("size_vram", 0) for m in running)
+        hardware.ollama_ram = sum(max(0, m.get("size", 0) - m.get("size_vram", 0)) for m in running)
         hardware.inference_gpu_used = any(m.get("size_vram", 0) > 0 and (model is None or m.get("name") in (model, model + ":latest")) for m in running)
     except (OSError, ValueError, BootstrapError, http.client.HTTPException):
         hardware.inference_gpu_used = False
+        hardware.ollama_vram = hardware.ollama_ram = 0
 
 
 def suitable(entry: dict, h: Hardware, provisional: bool = False) -> bool:
-    ram_ok = (h.ram_available or 0) >= entry["min_memory_gib"] * GIB
+    ram = min(h.ram_total or 0, (h.ram_available or 0) + h.ollama_ram) if h.ollama_ram else (h.ram_available or 0)
+    ram_ok = entry.get("cpu_supported", False) and ram >= entry["min_memory_gib"] * GIB
     gpu_memory = min(h.vram or 0, (h.vram_available if h.vram_available is not None else h.vram or 0) + h.ollama_vram)
-    gpu_ok = (h.inference_gpu_used or provisional) and gpu_memory >= entry["download_bytes"] + 1.5 * GIB
+    gpu_ok = (entry.get("gpu_supported", False) and h.acceleration_verified
+              and (h.inference_gpu_used or provisional) and h.vram_available is not None
+              and gpu_memory >= entry["min_vram_gib"] * GIB
+              and (h.ram_available or 0) >= entry["gpu_system_memory_gib"] * GIB)
     return h.available_threads >= entry["min_threads"] and (ram_ok or gpu_ok)
 
 
@@ -397,25 +431,36 @@ def performance_profile(settings, hardware: Hardware) -> str:
 
 
 def select_recommendation(catalog: dict, models: list[dict], h: Hardware) -> tuple[dict, bool]:
-    options = [m for m in catalog["models"] if suitable(m, h, provisional=h.acceleration_verified)]
-    known = {e["name"] for e in catalog["models"]}
-    for installed in models:
-        name, size = installed.get("name", ""), installed.get("size", 0)
-        quant = str(installed.get("details", {}).get("quantization_level", ""))
-        if (name not in known and isinstance(size, (int, float)) and 0 < size <= catalog.get("max_download_bytes", 10 * GIB)
-                and any(f in name.lower() for f in ("qwen", "llama3", "gemma"))
-                and not any(f in name.lower() for f in ("embed", "vision", "coder"))
-                and quant.startswith(("Q4", "Q5", "Q6", "Q8"))):
-            entry = {"name": name, "download_bytes": size, "min_memory_gib": 2 + size / GIB * 1.35,
-                     "min_threads": 4 if size < 3 * GIB else 6, "context": 4096 if size < 3 * GIB else 8192,
-                     "quality_rank": min(4, max(1, size / GIB))}
-            if suitable(entry, h, provisional=h.acceleration_verified):
-                options.append(entry)
+    options = [m for m in catalog["models"] if m.get("automatic_allowed") and m.get("chat") and m.get("portuguese")
+               and suitable(m, h, provisional=h.acceleration_verified)]
     if not options:
         raise BootstrapError("Memória/CPU abaixo da estimativa mínima dos modelos do catálogo. Libere recursos ou configure um servidor Ollama na LAN; nenhum modelo será baixado às cegas.")
     # Reuse a compatible installed model before downloading any alternative.
-    installed = [m for m in options if any(i.get("name") in (m["name"], m["name"] + ":latest") for i in models)]
+    installed = [{**m, "name": i["name"]} for m in options for i in models
+                 if i.get("name") in (m["name"], *m.get("aliases", []))]
     return max(installed or options, key=lambda m: m["quality_rank"]), bool(installed)
+
+
+def model_manifest(model: str) -> int:
+    """Verify the selected official registry tag without downloading any weight layer."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+", model):
+        raise BootstrapError("Identificador de modelo fora do catálogo oficial")
+    name, tag = model.split(":", 1)
+    request = urllib.request.Request(f"https://registry.ollama.ai/v2/library/{name}/manifests/{tag}",
+        headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            manifest = json.loads(response.read(2_000_001))
+        layers = manifest["layers"]
+        if not isinstance(layers, list) or not layers:
+            raise ValueError()
+        for layer in layers:
+            if (type(layer["size"]) is not int or not 0 < layer["size"] < 10 ** 13
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", layer["digest"])):
+                raise ValueError()
+        return sum(layer["size"] for layer in layers)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise BootstrapError("Não foi possível confirmar o modelo no registro oficial; verifique internet e tag. Nenhum download iniciado.") from None
 
 
 def pull_model(url: str, model: str, required_bytes: int, model_dir: Path, offline: bool) -> None:
@@ -427,7 +472,11 @@ def pull_model(url: str, model: str, required_bytes: int, model_dir: Path, offli
         directory = directory.parent
     if shutil.disk_usage(directory).free < required_bytes * 2 + GIB:
         raise BootstrapError("Espaço insuficiente no volume de modelos do Ollama")
-    log.info("Baixando um modelo recomendado: %s; interrupções podem ser retomadas pelo Ollama", model)
+    api(url, "/api/tags")  # Health check before contacting the official registry.
+    required_bytes = max(required_bytes, model_manifest(model))
+    if shutil.disk_usage(directory).free < required_bytes * 2 + GIB:
+        raise BootstrapError("Espaço insuficiente para o tamanho confirmado no registro")
+    log.info("Baixando %s: aproximadamente %.2f GiB; interrupções podem ser retomadas pelo Ollama", model, required_bytes / GIB)
     parts = urlsplit(url)
     cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
     connection = cls(parts.hostname, parts.port or (443 if parts.scheme == "https" else 11434), timeout=120)
@@ -438,6 +487,7 @@ def pull_model(url: str, model: str, required_bytes: int, model_dir: Path, offli
             raise BootstrapError(f"Download Ollama recusado ({response.status})")
         deadline = time.monotonic() + 7200
         success = False
+        progress = {}
         while time.monotonic() < deadline:
             line = response.readline(65536)
             if not line:
@@ -445,6 +495,13 @@ def pull_model(url: str, model: str, required_bytes: int, model_dir: Path, offli
             event = json.loads(line)
             if event.get("error"):
                 raise BootstrapError("Ollama falhou ao baixar o modelo; verifique conectividade/espaço e execute novamente")
+            total, completed = event.get("total"), event.get("completed", 0)
+            if type(total) is int and total > 0 and type(completed) is int and completed >= 0:
+                percent = min(100, completed * 100 // total)
+                digest = event.get("digest", "")
+                if percent // 10 > progress.get(digest, -1):
+                    progress[digest] = percent // 10
+                    log.info("Download %s: %d%% da camada (%.2f / %.2f GiB)", model, percent, completed / GIB, total / GIB)
             success = event.get("status") == "success"
             if success:
                 break
@@ -589,49 +646,56 @@ def probe_llm(url: str, model: str, context: int) -> dict:
 
 
 def configure_models(settings, catalog: dict, hardware: Hardware, previous: dict, offline: bool) -> tuple[str, dict]:
-    evaluated = {}
     profile = performance_profile(settings, hardware)
     models = installed_models(settings.llm_url)
     prefs = read_json(settings.performance_path).get("preferences", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
     manual = prefs.get("model") or (settings.llm_model if not settings.llm_auto_model else "")
     update_acceleration(hardware, settings.llm_url)
     if not is_local_inference(settings.llm_url):
         name = manual or settings.llm_model
         if not any(m.get("name") in (name, name + ":latest") for m in models):
             raise BootstrapError(f"Modelo ausente no servidor remoto. Execute nele: ollama pull {name}")
-        return name, {"llm_probe": previous.get("llm_probe", {})}
+        settings.llm_model = name
+        return name, {"selection_origin": "manual" if manual else "remote"}
     if manual:
         name = manual
         if not any(m.get("name") in (name, name + ":latest") for m in models):
-            entry = next((e for e in catalog["models"] if e["name"] == name), None)
+            entry = next((e for e in catalog["models"] if name in (e["name"], *e.get("aliases", []))), None)
             if entry is None:
                 raise BootstrapError(f"Modelo manual ausente e tamanho desconhecido. Instale conscientemente com ollama pull {name}; sua escolha foi preservada.")
+            if not suitable(entry, hardware, provisional=hardware.acceleration_verified):
+                raise BootstrapError("Recursos insuficientes para baixar e executar o modelo manual; escolha preservada")
             pull_model(settings.llm_url, name, entry["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
         context = settings.llm_num_ctx or 8192
     else:
-        # A single lightweight probe can confirm an installed GPU candidate before deciding to pull.
-        profile = performance_profile(settings, hardware)
-        maximum = {"economic": 2.5, "balanced": 5, "performance": 10}[profile] * GIB
-        selection = {**catalog, "models": [e for e in catalog["models"] if e["download_bytes"] <= maximum],
-                     "max_download_bytes": maximum}
-        candidates = [e for e in selection["models"] if suitable(e, hardware, provisional=bool(hardware.gpu))
-                      and any(m.get("name") in (e["name"], e["name"] + ":latest") for m in models)]
-        if hardware.gpu and hardware.acceleration_verified and not hardware.inference_gpu_used and candidates and previous.get("hardware") != hardware_key(hardware):
-            candidate = max(candidates, key=lambda e: e["quality_rank"])
-            try:
-                evaluated[(candidate["name"], candidate["context"])] = probe_llm(settings.llm_url, candidate["name"], candidate["context"])
-                update_acceleration(hardware, settings.llm_url, candidate["name"])
-            except (OSError, ValueError, BootstrapError, http.client.HTTPException):
-                log.warning("Candidato com GPU não passou na avaliação; seleção seguirá os recursos confirmados")
+        selection = catalog
+        if settings.llm_num_ctx:
+            # Scale the complete estimate conservatively when a user requests more context.
+            entries = []
+            for e in catalog["models"]:
+                ratio = max(1, settings.llm_num_ctx / e["context"])
+                entries.append({**e, "context": settings.llm_num_ctx,
+                                "min_memory_gib": e["min_memory_gib"] * ratio,
+                                "min_vram_gib": e["min_vram_gib"] * ratio})
+            selection = {**catalog, "models": entries}
+        if offline:
+            # No approval may be manufactured offline by testing an unknown local model.
+            from server.services.model_quality import QualityRegistry
+            approved = QualityRegistry(settings.llm_quality_path).read()["last_good"]
+            selection = {**selection, "models": [e for e in selection["models"]
+                if any(n in approved for n in (e["name"], *e.get("aliases", [])))]}
         entry, installed = select_recommendation(selection, models, hardware)
-        cached = previous.get("probe_identity", {})
-        cached_models = [m for m in models if m.get("name") in (cached.get("model"), str(cached.get("model")) + ":latest")]
-        if (cached.get("hardware") == hardware_key(hardware) and cached.get("catalog") == catalog["revision"]
-                and cached.get("profile") == profile and cached.get("ollama_version") == previous.get("ollama_version")
-                and cached_models and cached_models[0].get("digest") == cached.get("digest")):
-            cached_entry, cached_ready = select_recommendation(selection, cached_models, hardware)
-            if cached_ready:
-                entry, installed = cached_entry, True  # retain a measured lighter choice across restarts
+        preferred = previous.get("quality", {}).get("model")
+        if not preferred:
+            from server.services.model_quality import QualityRegistry
+            preferred = QualityRegistry(settings.llm_quality_path).read().get("selected", {}).get("model")
+        cached_models = [m for m in models if m.get("name") == preferred]
+        if cached_models:
+            cached_entry, ready = select_recommendation(selection, cached_models, hardware)
+            if ready:
+                entry, installed = cached_entry, True
         name, context = entry["name"], entry["context"]
         if not installed:
             pull_model(settings.llm_url, name, entry["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
@@ -639,36 +703,10 @@ def configure_models(settings, catalog: dict, hardware: Hardware, previous: dict
     identity = {"hardware": hardware_key(hardware), "model": name, "url": settings.llm_url, "context": context,
                 "catalog": catalog["revision"], "digest": metadata.get("digest"), "modified_at": metadata.get("modified_at"),
                 "ollama_version": previous.get("ollama_version"), "profile": profile}
-    if previous.get("probe_identity") == identity and previous.get("llm_probe"):
-        probe = previous["llm_probe"]
-    else:
-        probe = evaluated.get((name, context)) or probe_llm(settings.llm_url, name, context)
-        update_acceleration(hardware, settings.llm_url, name)
-        identity["hardware"] = hardware_key(hardware)
-        # Evaluate warm generation speed separately from cold loading.
-        if not manual and probe.get("tokens_per_s") and probe["tokens_per_s"] < 5:
-            confirmation = probe_llm(settings.llm_url, name, context)
-            probe["confirmed_tokens_per_s"] = confirmation.get("tokens_per_s")
-            selected_size = next((e["download_bytes"] for e in catalog["models"] if e["name"] == name), metadata.get("size", 0))
-            lighter = [e for e in catalog["models"] if suitable(e, hardware) and e["download_bytes"] < selected_size]
-            if not confirmation.get("tokens_per_s") or confirmation["tokens_per_s"] >= 5:
-                lighter = []
-            if lighter:
-                lighter_models = [m for m in models if 0 < m.get("size", 0) < selected_size]
-                smaller, ready = select_recommendation({"models": lighter}, lighter_models, hardware)
-                if not ready:
-                    pull_model(settings.llm_url, smaller["name"], smaller["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
-                # Unload only the candidate loaded for this assessment before loading the alternative.
-                api(settings.llm_url, "/api/generate", {"model": name, "keep_alive": 0})
-                name, context = smaller["name"], smaller["context"]
-                probe = probe_llm(settings.llm_url, name, context)
-                identity.update(model=name, context=context)
-                metadata = next((m for m in installed_models(settings.llm_url) if m.get("name") in (name, name + ":latest")), {})
-                identity.update(digest=metadata.get("digest"), modified_at=metadata.get("modified_at"))
     settings.llm_model = name
     if not manual:
         settings.llm_num_ctx = context
-    return name, {"llm_probe": probe, "probe_identity": identity}
+    return name, {"probe_identity": identity, "selection_origin": "manual" if manual else "automatic"}
 
 
 def check_only(root: Path, hardware: Hardware) -> int:
@@ -683,21 +721,41 @@ def check_only(root: Path, hardware: Hardware) -> int:
     return 1
 
 
-def validate_model_selection(settings, hardware: Hardware, *, force=False) -> dict:
+def validate_model_selection(settings, hardware: Hardware, *, force=False, offline=False) -> dict:
     from server.services.model_quality import QualityRegistry, configured_client
     client = configured_client(settings, hardware)
-    models = installed_models(settings.llm_url)
-    limit = {"economic": 2.5, "balanced": 5, "performance": 10}[performance_profile(settings, hardware)] * GIB
-    budget = max(max(0, (hardware.ram_available or 0) - 2 * GIB) * .65,
-                 max(0, (hardware.vram or 0) - 1.5 * GIB) if hardware.acceleration_verified else 0)
-    alternatives = [m["name"] for m in models if isinstance(m.get("size"), (int, float))
-                    and 0 < m["size"] <= min(limit, budget) and m.get("name") != client.name]
     registry = QualityRegistry(settings.llm_quality_path)
-    if not registry.approve_or_fallback(client, alternatives if settings.llm_auto_model else (),
-            force=force, allow_new=settings.llm_auto_model, compatible_names=alternatives):
+    report = registry.ensure(client, force=force and not offline, allow_tests=not offline)
+    if not report["approved"]:
         raise BootstrapError("IA indisponível: nenhum modelo passou nos oito testes de qualidade. O último modelo aprovado e as preferências foram preservados. Consulte data/model-quality.json.")
     settings.llm_model = client.name
-    return {"model": client.name, "approval_key": client.quality_key, "notice": client.recovery_notice}
+    return {"model": client.name, "approval_key": client.quality_key, "options": client.options(),
+            "identity": report["identity"], "notice": client.recovery_notice}
+
+
+def prepare_llm(settings, catalog: dict, hardware: Hardware, previous: dict, offline: bool, *, force=False) -> dict:
+    """Try at most three compatible candidates, preserving manual choices and good state."""
+    original = settings.llm_model, settings.llm_num_ctx
+    prefs = read_json(settings.performance_path).get("preferences", {})
+    manual = not settings.llm_auto_model or (isinstance(prefs, dict) and bool(prefs.get("model")))
+    remaining = list(catalog["models"])
+    try:
+        for attempt in range(1 if manual else 3):
+            settings.llm_num_ctx = original[1]
+            name, evaluation = configure_models(settings, {**catalog, "models": remaining}, hardware, previous, offline)
+            try:
+                quality = validate_model_selection(settings, hardware, force=force, offline=offline)
+                update_acceleration(hardware, settings.llm_url, name)
+                return {**evaluation, "quality": quality}
+            except (RuntimeError, ValueError, OSError, http.client.HTTPException):
+                log.warning("Modelo %s não aprovado (tentativa %d); configuração aprovada anterior preservada", name, attempt + 1)
+                if manual:
+                    raise BootstrapError("Modelo manual não aprovado; escolha preservada. Consulte o relatório de qualidade.") from None
+                remaining = [e for e in remaining if name not in (e["name"], *e.get("aliases", []))]
+        raise BootstrapError("Nenhum candidato passou na validação após três tentativas; IA indisponível")
+    except (RuntimeError, ValueError, OSError, http.client.HTTPException):
+        settings.llm_model, settings.llm_num_ctx = original
+        raise
 
 
 def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
@@ -727,16 +785,24 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
     profile = performance_profile(settings, hardware)
     log.info("Hardware: %s; %s threads disponíveis; perfil inicial %s", hardware.cpu or "CPU desconhecida", hardware.available_threads, profile)
     if settings.llm_enabled:
-        ensure_ollama(root, settings.llm_url, options.offline, owned)
         try:
-            state["ollama_version"] = api(settings.llm_url, "/api/version").get("version", "unknown")
-        except (OSError, ValueError, BootstrapError, http.client.HTTPException):
-            state["ollama_version"] = "unknown"
-        if options.reprobe:
-            state.pop("probe_identity", None)
-        model, evaluation = configure_models(settings, catalog, hardware, state, options.offline)
-        state.update(evaluation)
-        state["quality"] = validate_model_selection(settings, hardware, force=options.reprobe)
+            ensure_ollama(root, settings.llm_url, options.offline, owned)
+            try:
+                state["ollama_version"] = api(settings.llm_url, "/api/version").get("version", "unknown")
+            except (OSError, ValueError, BootstrapError, http.client.HTTPException):
+                state["ollama_version"] = "unknown"
+            if settings.bootstrap_managed:
+                settings.llm_num_ctx = base.llm_num_ctx  # A generated overlay is not an explicit context preference.
+            if settings.bootstrap_managed:
+                settings.llm_num_ctx = base.llm_num_ctx  # A generated overlay is not an explicit context preference.
+            evaluation = prepare_llm(settings, catalog, hardware, state, options.offline, force=options.reprobe)
+            state.update(evaluation)
+            state["llm_status"] = {"available": True}
+        except (OSError, ValueError, BootstrapError, http.client.HTTPException) as exc:
+            reason = str(exc) if isinstance(exc, BootstrapError) else type(exc).__name__
+            log.warning("IA indisponível (%s). Verifique data/model-quality.json, conexão e memória livre. Os demais serviços serão iniciados; modelo/preferências aprovados preservados.", reason)
+            state["llm_status"] = {"available": False, "reason": reason}
+            settings.llm_enabled = False  # Only this process/run; never change the user's TOML.
         model = settings.llm_model
     else:
         model = settings.llm_model
@@ -790,6 +856,11 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
         state["voice_identity"] = voice_identity
     if settings.bootstrap_managed:
         selected = {key: str(getattr(settings, key)) for key in baseline}
+        if not settings.llm_enabled:
+            for key in ("llm_model", "llm_num_ctx"):
+                selected.pop(key, None)
+                if key in prior.get("selected", {}):
+                    selected[key] = prior["selected"][key]
         write_json(automatic_path, {"schema_version": SCHEMA, "baseline": baseline, "selected": selected})
     state.update(schema_version=SCHEMA, hardware=hardware_key(hardware), hardware_observed=asdict(hardware),
                  catalog_revision=catalog["revision"], model=model, asr=str(settings.stt_model), tts=str(settings.tts_model),
@@ -848,9 +919,10 @@ def main(argv: list[str] | None = None) -> int:
         log.error("Outro inicializador Luna está em execução neste projeto")
         return 1
     try:
-        prepare(ROOT, options, owned)
+        prepared = prepare(ROOT, options, owned)
         if not options.prepare_only:
-            command([str(python), "-m", "server.main"])
+            command([str(python), "-m", "server.main",
+                     "--validated-llm" if prepared["settings"].llm_enabled else "--without-llm"])
         return 0
     except KeyboardInterrupt:
         log.info("Interrompido. Execute novamente para retomar as etapas pendentes.")

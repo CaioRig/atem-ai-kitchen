@@ -87,8 +87,10 @@ inicial contém Qwen 2.5 quantizado em 1.5B, 3B, 7B e 14B. Os tamanhos e requisi
 são estimativas conservadoras; os ranks de qualidade são heurísticas, não resultados
 de um benchmark comparativo de português.
 
-A seleção considera memória disponível, threads, VRAM utilizável, perfil solicitado,
-quantização e alternativas multilíngues já instaladas. Reutiliza uma alternativa
+A seleção considera memória disponível, threads, VRAM livre e contexto/cache previstos
+no catálogo. Apenas alternativas conhecidas, instruct/chat e adequadas ao português
+participam da seleção automática; Qwen 3B exige seleção manual devido à licença.
+Mantém o último aprovado ainda compatível e reutiliza uma alternativa
 compatível antes de baixar outra. Um modelo manual não é substituído. Quando o
 modelo manual falta, seu nome é preservado; downloads automáticos dele só ocorrem
 se seu tamanho estiver previsto no catálogo. Fora disso, o inicializador explica
@@ -96,11 +98,15 @@ como instalá-lo conscientemente.
 
 Detectar NVIDIA não comprova CUDA funcional: a detecção também chama `cuInit` e
 consulta dispositivos pela Driver API. O uso **pelo Ollama** é confirmado depois
-pela memória em GPU informada em `/api/ps`. Uma geração mínima, local, avalia carga
-e tokens/s. Velocidade muito baixa deve se repetir em duas avaliações curtas antes
-de uma escolha automática mais leve. Essa escolha fica salva para não retestar o
-modelo lento a cada execução. Não há troca de modelos escolhidos manualmente.
-O ensaio é uma estimativa operacional, não uma prova de qualidade factual.
+pela memória em GPU informada em `/api/ps`. A suíte de oito casos verifica respostas
+reais em português com os parâmetros da aplicação, incluindo a rota de receitas.
+Não há troca por velocidade isolada. Novas tentativas ficam limitadas a três
+candidatos compatíveis; escolhas manuais e aprovações anteriores são preservadas.
+Identidade e parâmetros aprovados ficam em `data/model-quality.json`. O servidor
+confere essa aprovação sem repetir a suíte feita pelo inicializador.
+Antes de baixar, o bootstrap consulta o manifesto da tag no registro oficial,
+verifica espaço e mostra tamanho estimado e progresso por camada. Os endpoints
+`/api/tags`, `/api/show` e `/api/pull` são os oficiais do Ollama.
 
 Em instalação automática nova, o perfil Econômico usa Whisper base multilíngue e
 Kokoro int8/Dora; os demais preservam Whisper small-q8_0 e Kokoro fp32/Dora.
@@ -164,7 +170,7 @@ Os mesmos argumentos servem para BAT e SH:
 | `--check` | Diagnóstico de hardware e dependências, sem instalar ou gravar estado |
 | `--prepare-only` | Prepara e valida sem iniciar o servidor Luna |
 | `--offline` | Proíbe instalações e downloads; usa os recursos preparados |
-| `--reprobe` | Refaz a avaliação leve; preserva preferências |
+| `--reprobe` | Refaz a suíte de qualidade e avaliações de voz; preserva preferências |
 
 Logs: `logs/bootstrap.log`, `logs/server.log` e, quando o processo Ollama foi iniciado
 pelo bootstrap, `logs/ollama.log`. Versões, arquivos, perfil e avaliações sem texto
@@ -174,6 +180,10 @@ os estados e erros dos serviços. Não publique seu `config/settings.toml`.
 Sem internet depois da preparação, ative `--offline` se quiser garantir que nenhuma
 tentativa de instalar ou baixar seja feita. IA, voz, ativação e memória funcionam
 localmente; YouTube e atualização do clima mantêm seu tratamento separado de rede.
+No modo offline, a IA só é habilitada com aprovação correspondente já salva.
+Se a IA falhar, somente ela é desabilitada nesta execução; TOML, última aprovação
+e preferências permanecem. Os outros serviços continuam a preparação normalmente.
+O catálogo e instruções para extensão/atualização estão no README.
 
 Sem disco, permissão ou componente correto, o fluxo para com orientação e código
 de saída diferente de zero. Não há loop de reinstalação. Se uma dependência nativa
@@ -182,7 +192,7 @@ reinstalar; nenhum dado de memória é apagado. Um par TLS incompleto não é so
 automaticamente. Certificados autoassinados não são adicionados à confiança do
 sistema sem ação do usuário.
 
-## Validação realizada e limites
+## Validação anterior e limites
 
 No Windows disponível, `start.bat --check` e a preparação completa com
 `start.bat --prepare-only --offline` passaram usando os modelos existentes, incluindo
@@ -207,6 +217,12 @@ Resultado final: 321 testes Python aprovados, três ignorados e um aviso de
 depreciação já existente; 16 testes do cliente e build TypeScript aprovados.
 Os 29 testes específicos de bootstrap cobrem preparação, cache e recuperação;
 há ainda testes da política de desempenho, incluindo persistência de contexto.
+
+O registro acima descreve a validação anterior. A implementação A–D de seleção de
+modelos tem resultados atualizados em `docs/model-selection-progress.md`, incluindo
+os oito testes reais do `qwen2.5:7b` já instalado. Nenhuma instalação limpa ou
+download real novo foi executado para essa atualização; cenários correspondentes
+usam mocks. A validação nativa Linux e outras GPUs continua pendente.
 
 Fontes dos mecanismos de instalação: [Python para Windows](https://www.python.org/downloads/windows/),
 [distribuições e checksums Node](https://nodejs.org/dist/v22.22.0/),

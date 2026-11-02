@@ -17,7 +17,7 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.quality")
 SCHEMA_VERSION = 1
-SUITE_VERSION = 3
+SUITE_VERSION = 4
 _LOCK = threading.RLock()
 UNAVAILABLE = "A IA local não passou na validação de qualidade. Verifique o modelo ou tente novamente após corrigir a configuração."
 CORRUPT = "Houve um problema na geração da resposta. Não vou reproduzir esse texto. Tente novamente."
@@ -66,10 +66,10 @@ def response_problem(prompt: str, text: str, *, partial: bool = False) -> str:
 
 CASES = (
     ("greeting", ("Bom dia!",)),
-    ("math", ("Quanto é 15 mais 27?",)),
+    ("math", ("Quanto é 15 + 27?",)),
     ("capital", ("Qual é a capital do Brasil?",)),
     ("context", ("Meu nome é Ana.", "Qual é meu nome?")),
-    ("cooking", ("Como faço um ovo mexido?",)),
+    ("cooking", ("Como preparar ovos mexidos?",)),
     ("instruction", ("Responda apenas com a palavra azul.",)),
     ("unknown", ("Qual é a senha que estou pensando?",)),
     ("language", ("Explique em uma frase o que é uma geladeira.",)),
@@ -112,7 +112,7 @@ def _hash(value) -> str:
 def local_signature(client) -> str:
     return _hash({"name": client.name, "host": client.address, "system": client.system_prompt,
                   "options": client.options(), "suite": SUITE_VERSION,
-                  "recipe_route": recipe_route(client, "Como faço um ovo mexido?")})
+                  "recipe_route": recipe_route(client, "Como preparar ovos mexidos?")})
 
 
 def recipe_route(client, question: str) -> tuple[str, int | None]:
@@ -234,7 +234,7 @@ class QualityRegistry:
             log.info("qualidade: modelo=%s aprovado=%s testes=%d/8", client.name, report["approved"], sum(r["passed"] for r in rows))
             return report
 
-    def approve_or_fallback(self, client, alternatives=(), *, force=False, allow_new=True, compatible_names=None) -> bool:
+    def approve_or_fallback(self, client, alternatives=(), *, force=False, allow_new=True, compatible_names=None, cached_only=False) -> bool:
         original = client.name
         names = list(dict.fromkeys([original, *self.read()["last_good"], *alternatives]))
         if compatible_names is not None:
@@ -243,7 +243,7 @@ class QualityRegistry:
         for name in names:
             candidate = client.clone(name=name)
             try:
-                report = self.ensure(candidate, force=force, allow_tests=allow_new or name == original or name in self.read()["last_good"])
+                report = self.ensure(candidate, force=force, allow_tests=not cached_only and (allow_new or name == original or name in self.read()["last_good"]))
             except (RuntimeError, ValueError, OSError) as exc:
                 reason = getattr(exc, "code", str(exc) if str(exc) in ("model_missing", "not_supported_chat_model") else type(exc).__name__)
                 log.warning("qualidade: modelo=%s falha=%s", name, reason)

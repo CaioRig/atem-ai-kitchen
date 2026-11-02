@@ -1,11 +1,65 @@
 {
   "schema_version": 1,
-  "revision": "2026-11-02.1",
+  "revision": "2026-11-02.2",
+  "memory_estimates": "Estimativas conservadoras da Luna, não requisitos oficiais nem garantia de compatibilidade. Incluem pesos, KV/cache no contexto indicado, runtime e reserva para SO/ASR/TTS. GPU exige RAM livre para serviços; memória compartilhada não conta como VRAM dedicada.",
+  "ranking": "Qualidade e desempenho relativos estimados dentro desta família, sem benchmark local; qualidade tem prioridade. Não reduzir modelo somente por tokens/s.",
   "node_version": "22.22.0",
   "models": [
-    {"name": "qwen2.5:1.5b", "download_bytes": 1100000000, "min_memory_gib": 3, "min_threads": 2, "context": 4096, "tier": "entry", "quantization": "Q4", "language": "multilingual-pt", "quality_rank": 1},
-    {"name": "qwen2.5:3b", "download_bytes": 2100000000, "min_memory_gib": 5, "min_threads": 4, "context": 4096, "tier": "entry", "quantization": "Q4", "language": "multilingual-pt", "quality_rank": 2},
-    {"name": "qwen2.5:7b", "download_bytes": 4800000000, "min_memory_gib": 9, "min_threads": 6, "context": 8192, "tier": "balanced", "quantization": "Q4", "language": "multilingual-pt", "quality_rank": 3},
-    {"name": "qwen2.5:14b", "download_bytes": 9500000000, "min_memory_gib": 18, "min_threads": 8, "context": 16384, "tier": "advanced", "quantization": "Q4", "language": "multilingual-pt", "quality_rank": 4}
+    {
+      "name": "qwen2.5:1.5b", "aliases": ["qwen2.5:1.5b-instruct-q4_K_M"],
+      "display_name": "Qwen2.5 1.5B Instruct", "family": "qwen2", "version": "2.5",
+      "digest_prefix": "65ec06548149", "parameters_billion": 1.54, "quantization": "Q4_K_M",
+      "download_bytes": 1100000000, "min_memory_gib": 3, "recommended_memory_gib": 5,
+      "min_vram_gib": 2.5, "recommended_vram_gib": 4, "gpu_system_memory_gib": 2,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 2, "context": 4096,
+      "chat": true, "language": "multilingual-pt", "portuguese": true,
+      "quality_rank": 1, "performance_rank": 4, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen2.5:1.5b",
+      "upstream": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct",
+      "verified_at": "2026-11-02", "license": "Apache-2.0",
+      "restrictions": "Preservar licença e avisos em redistribuições."
+    },
+    {
+      "name": "qwen2.5:3b", "aliases": ["qwen2.5:3b-instruct-q4_K_M"],
+      "display_name": "Qwen2.5 3B Instruct", "family": "qwen2", "version": "2.5",
+      "digest_prefix": "357c53fb659c", "parameters_billion": 3.09, "quantization": "Q4_K_M",
+      "download_bytes": 2100000000, "min_memory_gib": 5, "recommended_memory_gib": 7,
+      "min_vram_gib": 3.5, "recommended_vram_gib": 5, "gpu_system_memory_gib": 2,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 4, "context": 4096,
+      "chat": true, "language": "multilingual-pt", "portuguese": true,
+      "quality_rank": 2, "performance_rank": 3, "automatic_allowed": false,
+      "source": "https://ollama.com/library/qwen2.5:3b",
+      "upstream": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct",
+      "verified_at": "2026-11-02", "license": "Qwen-Research",
+      "restrictions": "Licença de pesquisa com restrições de uso e redistribuição; fora da seleção automática. Seleção manual deve observar o LICENSE oficial."
+    },
+    {
+      "name": "qwen2.5:7b", "aliases": ["qwen2.5:7b-instruct-q4_K_M"],
+      "display_name": "Qwen2.5 7B Instruct", "family": "qwen2", "version": "2.5",
+      "digest_prefix": "845dbda0ea48", "parameters_billion": 7.62, "quantization": "Q4_K_M",
+      "download_bytes": 4800000000, "min_memory_gib": 9, "recommended_memory_gib": 12,
+      "min_vram_gib": 6.5, "recommended_vram_gib": 8, "gpu_system_memory_gib": 2,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 6, "context": 8192,
+      "chat": true, "language": "multilingual-pt", "portuguese": true,
+      "quality_rank": 3, "performance_rank": 2, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen2.5:7b",
+      "upstream": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct",
+      "verified_at": "2026-11-02", "license": "Apache-2.0",
+      "restrictions": "Preservar licença e avisos em redistribuições."
+    },
+    {
+      "name": "qwen2.5:14b", "aliases": ["qwen2.5:14b-instruct-q4_K_M"],
+      "display_name": "Qwen2.5 14B Instruct", "family": "qwen2", "version": "2.5",
+      "digest_prefix": "7cdf5a0187d5", "parameters_billion": 14.8, "quantization": "Q4_K_M",
+      "download_bytes": 9500000000, "min_memory_gib": 18, "recommended_memory_gib": 24,
+      "min_vram_gib": 13, "recommended_vram_gib": 16, "gpu_system_memory_gib": 2,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 8, "context": 16384,
+      "chat": true, "language": "multilingual-pt", "portuguese": true,
+      "quality_rank": 4, "performance_rank": 1, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen2.5:14b",
+      "upstream": "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct",
+      "verified_at": "2026-11-02", "license": "Apache-2.0",
+      "restrictions": "Preservar licença e avisos em redistribuições."
+    }
   ]
 }

@@ -50,6 +50,66 @@ Guia de instalação, uso offline, configuração manual, servidor na LAN e diag
 [`docs/inicializacao.md`](docs/inicializacao.md). Para somente diagnosticar, execute
 `start.bat --check` ou `./start.sh --check`.
 
+## Modelos Ollama automáticos
+
+O `start.bat` preserva suas etapas de preparação e usa `scripts/bootstrap.py` para
+detectar CPU/núcleos/threads, RAM disponível, GPU/VRAM, driver, SO e disco.
+Windows usa as APIs do sistema; Linux consulta `/proc`, afinidade e limites cgroup v2.
+NVIDIA exige inicialização CUDA; o uso real pelo Ollama é conferido em `/api/ps`.
+Outras GPUs têm inventário conservador, sem presumir aceleração ou VRAM dedicada.
+
+O catálogo offline [`config/model-catalog.json`](config/model-catalog.json) contém
+identificação/tag e aliases instruct, família, versão/digest conhecido, parâmetros,
+quantização, download, estimativas mínimas/recomendadas de RAM/VRAM, contexto,
+CPU/GPU, português, ranks relativos, fontes, data e licença. As estimativas incluem
+contexto/cache e reserva para SO/voz/transcrição; não são garantias oficiais.
+Qwen 3B está catalogado, mas excluído da seleção automática por sua licença de pesquisa.
+Metadados consultados nas [páginas oficiais Ollama](https://ollama.com/library/qwen2.5)
+e no [repositório Qwen](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct).
+
+A seleção preserva escolhas manuais e o último modelo aprovado ainda compatível.
+Depois prefere candidatos conhecidos já instalados, priorizando qualidade dentro
+dos recursos livres. Não troca modelos somente por velocidade. Quando necessário,
+confirma a tag no registro oficial, verifica espaço e baixa um candidato pela
+API `/api/pull`, exibindo progresso. Interrompeu? Execute novamente para retomar.
+Instalação é confirmada por `/api/tags` e `/api/show`; aliases conhecidos evitam
+downloads redundantes. Nunca são apagados modelos do usuário.
+
+Cada novo candidato passa pelos oito testes reais da aplicação (saudação, 42,
+Brasília, instrução azul, ovos mexidos, contexto em duas mensagens, desconhecimento
+de senha e português). Template, digest, versão do Ollama, hardware e parâmetros
+fazem parte da identidade da aprovação. Reprovação permite até três candidatos
+compatíveis no modo automático; o último aprovado e as preferências permanecem.
+HTTP 200 sozinho não aprova nada. Consulte `data/model-quality.json` e
+`data/bootstrap-state.json`; o servidor reutiliza a aprovação sem repetir a suíte.
+Esses testes detectam falhas evidentes, sem garantir acerto universal.
+
+Para acrescentar modelos, copie um registro completo do JSON, consulte fontes
+oficiais, mantenha tags/aliases únicos, explicite estimativas, confira licença e
+incremente `revision`. Valide antes de usar:
+`python -c "from scripts.bootstrap import ROOT, load_catalog; load_catalog(ROOT)"`
+(use o Python do `.venv`). Valores inválidos ou metadados obrigatórios ausentes são
+rejeitados. Não há atualização silenciosa pela internet. O Hugging Face Hub pode
+informar licença/família do upstream; seus pesos não equivalem automaticamente
+ao GGUF do Ollama e sua API não comprova compatibilidade de hardware.
+
+Para fixar um modelo, em `[llm]` de `config/settings.toml` defina
+`automatic_model = false` e `model = "nome:tag"`, ou use Configurações → Desempenho.
+Para restaurar automático, limpe a escolha no painel, defina `automatic_model = true`
+e, para sobreposição automática em instalações antigas, `[bootstrap] managed = true`.
+O inicializador nunca reescreve seu TOML existente. Uma edição de `model` diferente
+da baseline salva tem prioridade; para restaurar essa sobreposição, renomeie
+`data/bootstrap-auto.json` e execute novamente, preservando o arquivo antigo.
+
+Após a primeira preparação aprovada, use `start.bat --offline` para proibir
+downloads/instalações. Nesse modo, somente uma aprovação salva correspondente é
+aceita; mudança de template/digest/configuração exige validação fora desse modo.
+Use `start.bat --reprobe` para forçar nova validação. Sem modelo utilizável, a Luna
+inicia os demais serviços com IA indisponível nesta execução, preservando a configuração.
+Falhas de dependências, voz/ativação ou TLS ainda podem impedir a inicialização.
+Consulte `logs/bootstrap.log`, libere RAM/VRAM/disco e confira Ollama/internet;
+veja mais soluções em [`docs/inicializacao.md`](docs/inicializacao.md).
+
 ## Instalação manual existente (opcional, Windows)
 
 ```powershell
