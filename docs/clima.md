@@ -1,5 +1,9 @@
 # Previsão do tempo com cache local e funcionamento offline — Fase 8
 
+Atualização de 2026-11-02: a janela de previsão foi substituída pelo conteúdo na
+área principal da Luna. O prazo configurado foi preservado e não interfere em
+respostas/receitas posteriores. Veja `docs/conteudo-visual.md`.
+
 ## Atualização diária e janela de previsão (2026-11-01)
 
 Com `[weather] auto_refresh = true` (padrão), o servidor verifica o clima ao iniciar

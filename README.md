@@ -7,6 +7,7 @@ na rede local.
 - Plano, decisoes e inspecao do ambiente: `docs/plano.md`
 - Operacao, inicializacao automatica e roteiro de aceite no LG: `docs/operacao.md`
 - Interface responsiva, toque e comandos de tela por voz: `docs/interface.md`
+- Area visual para respostas, receitas, previsoes e videos: `docs/conteudo-visual.md`
 - Protocolo cliente/servidor: `docs/protocolo.md`
 - Instalacao do servidor (Windows): `docs/instalacao-servidor.md`
 - Microfone e palavra de ativacao: `docs/microfone.md`

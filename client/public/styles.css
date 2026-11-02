@@ -402,3 +402,35 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9cdfff; outline
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 #memory-panel, #forecast-panel, #settings-panel { top: 12px; max-height: max(96px, calc(100dvh - var(--controls-height, 36dvh) - 40px)); }
+
+/* A area da Luna alterna entre rosto e conteudo; a resposta nao e duplicada. */
+#stage-content { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 0 20px; }
+#stage-content > header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; flex-shrink: 0; padding: 8px 0 14px; border-bottom: 1px solid #293d56; }
+#stage-title { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; flex: 1 1 150px; }
+#stage-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 20px 0; font-size: 1.125rem; line-height: 1.65; overflow-wrap: anywhere; }
+#stage-scroll p { white-space: pre-line; margin: 14px 0; }
+#stage-scroll h3 { color: #9cdfff; font-size: 1.15rem; border-top: 1px solid #293d56; padding-top: 16px; }
+#stage-scroll iframe { width: 100%; min-height: 200px; border: 0; aspect-ratio: 16 / 9; }
+.video-result, .external-video { display: block; width: 100%; text-align: left; margin: 12px 0; white-space: normal; overflow-wrap: anywhere; }
+.external-video { min-height: 48px; padding: 12px; font-size: 1rem; color: #9cdfff; }
+.show-content #stage { display: flex; }
+.show-content .brand { padding: 12px 20px 4px; font-size: 1rem; }
+.show-content .brand span { display: none; }
+.show-content .mood { padding: 4px 16px; }
+.show-content .status { font-size: 1rem; padding: 4px 16px 12px; }
+@media (min-width: 901px) { #app.show-content { grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); } }
+@media (max-width: 900px), (max-height: 520px) {
+  #app.show-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 1fr) minmax(0, 40dvh); }
+  .show-content #stage { grid-column: 1; grid-row: 1; }
+  .show-content #panel { grid-column: 1; grid-row: 2; }
+  #stage-content { padding: 0 12px; }
+  #stage-content > header { padding: 4px 0 8px; }
+  .show-content #content-scroll { min-height: 36px; }
+  .show-content #indicators { max-height: 30dvh; }
+}
+@media (max-height: 520px) and (min-width: 600px) {
+  #app.show-content { grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .show-content #stage { grid-column: 1; grid-row: 1; }
+  .show-content #panel { grid-column: 2; grid-row: 1; }
+  .show-content #indicators { max-height: 55dvh; }
+}

@@ -136,6 +136,8 @@ class Conversation:
         self.view_kind = "reply"
         query = video_query(text) if self.videos and self.on_screen else None
         if query:
+            if self.memory and self.memory.awaiting_confirmation:
+                self.memory.handle("cancelar")
             self._cancel_hold()
             self._retry_text = None
             self._task = asyncio.create_task(self._run_videos(query))

@@ -1,5 +1,9 @@
 # Interface por toque e voz
 
+Atualização de 2026-11-02: respostas, receitas e previsões agora ocupam a área do
+rosto, com retorno por toque/voz. A previsão deixou de ser painel sobreposto.
+Veja `docs/conteudo-visual.md` para os modos, vídeos e precedência de fechamento.
+
 Atualizada em 2026-11-01. O corte vinha de `overflow: hidden` no corpo,
 grade com altura fixa e cartoes comprimidos sem area de rolagem suficiente.
 Agora o conteudo tem rolagem independente e os controles ficam em uma area

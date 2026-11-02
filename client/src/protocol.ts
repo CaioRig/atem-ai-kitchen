@@ -169,6 +169,7 @@ export interface TranscriptMsg {
 }
 
 export interface ReplyMsg {
+  view?: "reply" | "recipe";
   type: "reply";
   text: string;
   /** false enquanto a resposta ainda está sendo gerada (texto parcial). */
@@ -212,6 +213,7 @@ export interface SpeakErrorMsg {
 }
 
 export type ServerMsg =
+  | { type: "videos"; query: string; items: import("./stage.js").VideoItem[]; message: string }
   | { type: "screen"; action: string; message?: string }
   | WelcomeMsg
   | StateMsg

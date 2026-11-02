@@ -16,7 +16,6 @@ export class Panel {
   private readonly status = byId("status");
   private readonly mood = byId("mood");
   private readonly heard = byId("heard");
-  private readonly reply = byId("reply");
   private readonly weatherText = byId("weather-text");
   private readonly weatherUpdated = byId("weather-updated");
   private readonly conn = byId("conn");
@@ -65,12 +64,6 @@ export class Panel {
   setHeard(text: string, final = true): void {
     this.heard.textContent = text || "—";
     this.heard.classList.toggle("partial", !final);
-  }
-
-  /** Resposta da IA; `final = false` enquanto o texto ainda está chegando. */
-  setReply(text: string, final = true): void {
-    this.reply.textContent = text || "—";
-    this.reply.classList.toggle("partial", !final);
   }
 
   /** Cartão "Clima": resumo, linha de atualização (hora da consulta à fonte) e destaque quando os dados estão antigos. */

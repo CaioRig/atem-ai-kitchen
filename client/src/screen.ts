@@ -1,14 +1,15 @@
+import type { StageView } from "./stage.js";
 /** Comandos locais de tela e preferencias do quiosque. Sem acesso a codigo recebido. */
 export function textScale(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n >= 1 && n <= 1.5 ? n : 1;
 }
 const KEY = "luna.text.scale";
-const panels = ["settings-panel", "memory-panel", "forecast-panel"];
+const panels = ["settings-panel", "memory-panel"];
 
 export class ScreenControls {
   private scale = 1;
-  constructor(private notice: (text: string) => void) {
+  constructor(private notice: (text: string) => void, private stage: StageView) {
     new ResizeObserver(entries => {
       document.documentElement.style.setProperty("--controls-height", `${entries[0].target.getBoundingClientRect().height}px`);
     }).observe(document.getElementById("indicators")!);
@@ -37,7 +38,7 @@ export class ScreenControls {
       for (const other of panels) if (other !== id) this.close(other);
     });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.active()) {
+      if (event.key === "Escape" && (this.active() || this.stage.mode !== "face")) {
         event.stopImmediatePropagation(); this.execute("close");
       }
     }, true);
@@ -70,16 +71,17 @@ export class ScreenControls {
       }
       case "close": {
         const active = this.active();
-        if (active) this.close(active); else this.notice("Nenhuma janela aberta");
+        if (active) this.close(active); else if (this.stage.mode !== "face") this.stage.close(); else this.notice("Nenhuma janela aberta");
         break;
       }
       case "home":
         panels.forEach(id => this.close(id));
+        this.stage.close();
         document.getElementById("content-scroll")!.scrollTo({ top: 0 });
         this.notice("Tela principal"); break;
       case "up": case "down": {
         const active = this.active();
-        const target = document.getElementById(active === "memory-panel" ? "memory-list" : active || "content-scroll")!;
+        const target = document.getElementById(active === "memory-panel" ? "memory-list" : active || (this.stage.mode !== "face" ? "stage-scroll" : "content-scroll"))!;
         const before = target.scrollTop;
         target.scrollBy({ top: (action === "down" ? 1 : -1) * target.clientHeight * 0.7, behavior: "instant" });
         if (before === target.scrollTop) this.notice("Limite da rolagem");
@@ -89,6 +91,9 @@ export class ScreenControls {
         this.scale = Math.max(1, Math.min(1.5, Math.round((this.scale + (action === "larger" ? 0.1 : -0.1)) * 10) / 10));
         this.applyScale(); this.notice(`Texto em ${Math.round(this.scale * 100)}%`); break;
       case "stop": this.notice("Fala interrompida"); break;
+      case "video1": case "video2": case "video3": void this.stage.select(Number(action.slice(-1)) - 1); break;
+      case "pause_video": this.stage.pause(); break;
+      case "resume_video": this.stage.resume(); break;
       default: this.notice("Ação de tela indisponível");
     }
   }

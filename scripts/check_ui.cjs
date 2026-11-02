@@ -39,11 +39,13 @@ const server = http.createServer((req,res) => {
     for(const [w,h] of [[360,800],[768,1024],[1024,768],[1366,768],[1920,1080],[800,360]]) {
       await page.setViewportSize({width:w,height:h});
       await screen('home');
+      socket.send(JSON.stringify({type:'state',state:'thinking',detail:''}));
       socket.send(JSON.stringify({type:'reply',final:true,text:'Receita de legumes\n'+('1. Separe os ingredientes, lave e prepare com cuidado.\n').repeat(35)}));
+      socket.send(JSON.stringify({type:'state',state:'idle',detail:''}));
       await page.waitForTimeout(100);
       await audit();
       await screen('down');
-      assert(await page.locator('#content-scroll').evaluate(e=>e.scrollTop>0));
+      assert(await page.locator('#stage-scroll').evaluate(e=>e.scrollTop>0));
       await page.screenshot({path:`data/ui-check/main-${w}x${h}.png`});
       await page.locator('#settings-open').tap(); await audit();
       await page.screenshot({path:`data/ui-check/settings-${w}x${h}.png`});
@@ -53,8 +55,8 @@ const server = http.createServer((req,res) => {
       await page.screenshot({path:`data/ui-check/memory-${w}x${h}.png`});
       socket.send(JSON.stringify({type:'weather',available:true,summary:'Hoje: sol',detail:'',forecast:{text:'Amanhã, terça-feira: parcialmente nublado, mínima 15 e máxima 25 graus, chuva 30%. '.repeat(12)}}));
       await page.waitForTimeout(100);await audit();
-      assert(await page.locator('#memory-panel').evaluate(e=>e.classList.contains('hidden')));
-      await screen('close');assert(await page.locator('#forecast-panel').evaluate(e=>e.classList.contains('hidden')));
+      await screen('close');
+      await screen('close');assert(await page.locator('#stage-content').evaluate(e=>e.classList.contains('hidden')));
       console.log(`${w}x${h}: toque, rolagem, textos longos, paineis e limites OK`);
     }
     await page.setViewportSize({width:360,height:800});

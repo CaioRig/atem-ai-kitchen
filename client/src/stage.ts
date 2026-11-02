@@ -29,6 +29,7 @@ export class StageView {
   mode: StageMode = "face";
   private version = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private loadTimer: ReturnType<typeof setTimeout> | undefined;
   private player: Player | undefined;
   private ready = false;
   private ignoreReplies = false;
@@ -43,10 +44,12 @@ export class StageView {
   private transition(mode: StageMode, title: string): void {
     ++this.version;
     clearTimeout(this.timer);
+    clearTimeout(this.loadTimer);
     this.timer = undefined;
     if (this.player) { this.player.destroy(); this.player = undefined; }
     this.ready = false;
     this.mode = mode;
+    this.area.dataset.mode = mode;
     this.scroll.replaceChildren();
     this.scroll.scrollTop = 0;
     this.title.textContent = title;
@@ -62,10 +65,10 @@ export class StageView {
     this.renderText(text, kind === "recipe");
   }
   private renderText(text: string, recipe = false): void {
-    const nodes = text.split(/\n+/).filter(Boolean).map(line => {
+    const nodes = text.split(/\n+/).filter(Boolean).map((line, index) => {
       const clean = line.replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "");
       const heading = recipe && /^(ingredientes|modo de preparo|preparo|passo a passo|porções|rendimento)\b/i.test(clean);
-      const node = document.createElement(heading ? "h3" : "p");
+      const node = document.createElement(heading ? "h3" : recipe && index === 0 && clean.length < 100 ? "h2" : "p");
       node.textContent = clean;
       return node;
     });
@@ -112,6 +115,7 @@ export class StageView {
     this.link("Abrir este vídeo no YouTube", `https://www.youtube.com/watch?v=${item.id}`);
     const fail = () => { status.textContent = "Não foi possível reproduzir aqui. A conexão ou a incorporação pode estar bloqueada. Use o link para abrir no YouTube."; };
     const timeout = setTimeout(() => { if (version === this.version && !this.ready) fail(); }, 15000);
+    this.loadTimer = timeout;
     try {
       const api = await youtube();
       if (version !== this.version) return;

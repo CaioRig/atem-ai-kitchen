@@ -12,6 +12,10 @@
       <section id="stage">
         <div class="brand">LUNA <span>Sua companhia na cozinha</span></div>
         <canvas id="face" aria-label="Rosto do assistente"></canvas>
+        <section id="stage-content" class="hidden" aria-labelledby="stage-title">
+          <header><h2 id="stage-title">Luna responde</h2><button id="stage-back" class="pill" type="button">Voltar para Luna</button></header>
+          <div id="stage-scroll" tabindex="0" aria-label="Conteúdo da Luna"></div>
+        </section>
         <div id="mood" class="mood" aria-live="polite">Inicializando</div>
         <div id="status" class="status">Inicializando…</div>
       </section>
@@ -31,10 +35,6 @@
         <div class="card">
           <div class="label">Você disse</div>
           <div id="heard" class="text">—</div>
-        </div>
-        <div class="card grow">
-          <div class="label">Resposta</div>
-          <div id="reply" class="text">—</div>
         </div>
         </div>
         <div id="indicators" aria-label="Controles da Luna">
@@ -110,10 +110,6 @@
           Apagar todas
         </button>
       </footer>
-    </section>
-    <section id="forecast-panel" class="hidden" role="dialog" aria-labelledby="forecast-title" aria-live="polite">
-      <header><h2 id="forecast-title">Previsão do tempo</h2><button id="forecast-close" type="button" class="pill">Fechar</button></header>
-      <p id="forecast-text"></p>
     </section>
     <div id="toast" class="toast hidden" aria-live="polite"></div>
     <script type="module" src="js/main.js"></script>

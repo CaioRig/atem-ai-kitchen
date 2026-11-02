@@ -289,7 +289,10 @@ def create_app(
     async def on_reply(text: str, final: bool) -> None:
         if final:
             llm_status["reason"] = ""
-        await hub.broadcast({"type": "reply", "text": text, "final": final, "view": conversation.view_kind})
+        event = {"type": "reply", "text": text, "final": final}
+        if conversation.view_kind == "recipe":
+            event["view"] = "recipe"
+        await hub.broadcast(event)
 
     async def on_reply_error(code: str, message: str) -> None:
         llm_status["reason"] = message

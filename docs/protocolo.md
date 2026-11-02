@@ -1,5 +1,13 @@
 # Protocolo cliente ↔ servidor (WebSocket, JSON)
 
+Conteúdo visual (2026-11-02): `reply` pode incluir `view: "recipe"` (ausente = resposta
+comum). Evento `videos {query, items: [{id, title, source}], message}` traz resultados
+validados ou lista vazia com motivo. O evento `screen` também aceita `video1`,
+`video2`, `video3`, `pause_video`, `resume_video`; a interface valida o modo atual
+antes de executar. `weather.forecast` passa a ocupar a área principal, com o prazo
+configurado, sem alterar o cartão de hoje. Não são recebidos comandos executáveis
+ou URLs arbitrárias do modelo.
+
 Endpoint: `ws://<host>:<porta>/ws`. Mensagens de texto são JSON com campo
 `type`. Mensagens **binárias** são áudio do microfone: PCM int16 little-endian,
 mono, 16 kHz, em quadros de qualquer tamanho (o cliente envia 1280 amostras =

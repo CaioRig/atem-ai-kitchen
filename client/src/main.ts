@@ -1,4 +1,5 @@
-import { ForecastPopup } from "./forecast.js";
+import { ForecastSettings } from "./forecast.js";
+import { StageView } from "./stage.js";
 import { ScreenControls } from "./screen.js";
 // Ponto de entrada da interface do quiosque.
 // Sem token: modo local (interface + microfone, sem detecção), útil para demonstração.
@@ -29,11 +30,12 @@ import { JarvisSocket } from "./ws.js";
 import { SpeechPlayer } from "./speaker.js";
 
 const TOKEN_KEY = "jarvis.token";
-const forecastPopup = new ForecastPopup();
+const forecastSettings = new ForecastSettings();
 const WEATHER_KEY = "jarvis.weather";
 const MIC_KEY = "atem.mic"; // "off" desliga o microfone de forma persistente
 const DEFAULT_PHRASE = "hey Luna";
 let screenControls: ScreenControls;
+let stage: StageView;
 
 const DEBUG_KEYS: Record<string, ServerState> = {
   "1": "booting",
@@ -83,7 +85,8 @@ function showMood(
 
 function setupCommon(): { panel: Panel; face: PixelFace } {
   const panel = new Panel();
-  screenControls = new ScreenControls(text => panel.showToast(text));
+  stage = new StageView(text => panel.showToast(text));
+  screenControls = new ScreenControls(text => panel.showToast(text), stage);
   document.getElementById("replay-answer")!.addEventListener("click", () => {
     if (!location.hash && !localStorage.getItem(TOKEN_KEY)) panel.showToast("Conecte ao servidor para repetir a resposta");
   });
@@ -215,6 +218,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
   });
   document.addEventListener("pointerdown", () => player.unlock());
   document.addEventListener("keydown", () => player.unlock());
+  document.addEventListener("luna:video-play", () => {
+    player.stop();
+    socket.send({ type: "cancel" });
+  });
 
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const socket = new JarvisSocket(`${proto}://${location.host}/ws`, token, {
@@ -227,6 +234,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
       if (connected) disconnectedAt = performance.now();
       connected = false;
       player.stop(); // sem servidor, nada confirma o fim da fala
+      stage.pause(true);
       panel.setConnection("reconnecting", `${reason}, nova tentativa em ${Math.round(retryInMs / 1000)} s`);
       refresh();
     },
@@ -255,11 +263,12 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           screenControls.execute(msg.action, msg.message);
           break;
         case "state":
+          if (["wake", "listening", "synthesizing"].includes(msg.state)) stage.pause(true);
           // Nova interação: limpa o texto anterior. Em "idle" ele permanece visível.
           if (canCancel(msg.state) && !canCancel(serverState)) panel.setHeard("");
           // Nova pergunta a caminho da IA: limpa a resposta e as falhas anteriores.
           if (msg.state === "thinking" && serverState !== "thinking") {
-            panel.setReply("");
+            stage.begin();
             replyError = "";
             speechError = "";
           }
@@ -270,7 +279,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           panel.setHeard(msg.text, msg.final);
           break;
         case "reply":
-          panel.setReply(msg.text, msg.final ?? true);
+          stage.reply(msg.text, msg.view);
           if (msg.final !== false) {
             replyError = "";
             llm = { available: true, reason: "" };
@@ -279,9 +288,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
         case "reply_error":
           replyError = msg.message;
           llm = { available: false, reason: msg.message };
-          panel.setReply(msg.message);
+          stage.reply(msg.message);
           break;
         case "speak_start":
+          stage.pause(true);
           speechError = "";
           player.start(msg.id, msg.sample_rate);
           break;
@@ -318,7 +328,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
         case "weather":
           // Resposta a uma pergunta sobre o tempo: o cartão "Clima" mostra o resumo e de quando são os dados.
           showWeather(panel, msg);
-          if (msg.forecast) forecastPopup.show(msg.forecast.text);
+          if (msg.forecast) stage.forecast(msg.forecast.text, forecastSettings.seconds);
+          break;
+        case "videos":
+          stage.results(msg.query, msg.items, msg.message);
           break;
         case "error":
           console.warn("servidor:", msg.code, msg.message);
