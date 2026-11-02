@@ -6,6 +6,7 @@ na rede local.
 
 - Plano, decisoes e inspecao do ambiente: `docs/plano.md`
 - Operacao, inicializacao automatica e roteiro de aceite no LG: `docs/operacao.md`
+- Inicializador único Windows/Linux, instalação automática e recuperação: `docs/inicializacao.md`
 - Interface responsiva, toque e comandos de tela por voz: `docs/interface.md`
 - Area visual para respostas, receitas, previsoes e videos: `docs/conteudo-visual.md`
 - Protocolo cliente/servidor: `docs/protocolo.md`
@@ -36,7 +37,19 @@ config/            settings.example.toml -> copie para settings.toml
 models/            modelos baixados por scripts/prepare_models.py (fora do git)
 ```
 
-## Inicio rapido (servidor, Windows)
+## Início rápido (Windows e Linux)
+
+Na pasta do projeto, execute **`start.bat`** no Windows ou **`./start.sh`** no Linux.
+O inicializador verifica o ambiente, instala o que falta, escolhe/reutiliza modelos,
+prepara a interface e inicia o servidor. Na primeira vez, permita os downloads e as
+autorizações administrativas explicitamente solicitadas. Nas próximas execuções,
+as etapas prontas são reutilizadas. Configurações e memórias existentes são preservadas.
+
+Guia de instalação, uso offline, configuração manual, servidor na LAN e diagnóstico:
+[`docs/inicializacao.md`](docs/inicializacao.md). Para somente diagnosticar, execute
+`start.bat --check` ou `./start.sh --check`.
+
+## Instalação manual existente (opcional, Windows)
 
 ```powershell
 .\scripts\setup-server.ps1    # cria .venv, instala dependencias, gera config, token e certificado TLS

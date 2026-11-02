@@ -8,4 +8,6 @@ pywhispercpp>=1.5,<2
 # Voz da Luna (Kokoro-82M via ONNX, CPU; voz feminina pt-BR pf_dora). Modelo: scripts/prepare_models.py kokoro
 # Traz o espeak-ng embutido (espeakng-loader); nada a instalar no sistema.
 kokoro-onnx>=0.6,<1
+# Certificado HTTPS local, sem instalar openssl globalmente.
+cryptography>=44,<47
 # Motor alternativo (vozes pt-BR masculinas, mais leve): pip install "piper-tts>=1.8,<2" e [tts] engine = "piper"

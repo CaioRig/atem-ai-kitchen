@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ class ConfigError(RuntimeError):
 
 @dataclass
 class Settings:
+    bootstrap_managed: bool = False
     performance_profile: str = "automatic"
     performance_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "performance.json")
     bind_host: str = "127.0.0.1"
@@ -54,6 +56,8 @@ class Settings:
     llm_enabled: bool = True
     llm_url: str = "http://127.0.0.1:11434"
     llm_model: str = "qwen2.5:7b"
+    llm_auto_model: bool = False  # existing TOML model choices remain manual
+    llm_num_ctx: int = 0
     llm_system_prompt: str = ""  # vazio = instrucao padrao da Luna (server/services/llm.py)
     llm_connect_timeout_s: float = 5.0
     llm_timeout_s: float = 60.0
@@ -137,6 +141,8 @@ class Settings:
                 raise ConfigError("llm.connect_timeout_s e llm.timeout_s devem ser maiores que zero")
             if self.llm_max_tokens <= 0:
                 raise ConfigError("llm.max_tokens deve ser maior que zero")
+            if self.llm_num_ctx < 0:
+                raise ConfigError("llm.num_ctx não pode ser negativo")
         if self.tts_enabled:
             if self.tts_engine not in ("kokoro", "piper"):
                 raise ConfigError(f"tts.engine invalido: {self.tts_engine!r}; use \"kokoro\" ou \"piper\"")
@@ -203,6 +209,7 @@ class Settings:
         recipes = raw.get("recipes", {})
         weather = raw.get("weather", {})
         performance = raw.get("performance", {})
+        bootstrap = raw.get("bootstrap", {})
         models_dir = PROJECT_ROOT / "models" / "openwakeword"
         tts_engine = str(tts.get("engine", "kokoro")).strip().lower()
         tts_default_model = "models/tts/pt_BR-faber-medium.onnx" if tts_engine == "piper" else "models/tts/kokoro-v1.0.onnx"
@@ -212,6 +219,9 @@ class Settings:
             return PROJECT_ROOT / text if text else None
 
         return cls(
+            bootstrap_managed=bool(bootstrap.get("managed", False)),
+            llm_auto_model=bool(llm.get("automatic_model", False)),
+            llm_num_ctx=int(llm.get("num_ctx", 0)),
             performance_profile=str(performance.get("profile", "automatic")),
             performance_path=PROJECT_ROOT / str(performance.get("path", "data/performance.json")),
             bind_host=str(srv.get("bind_host", "127.0.0.1")),
@@ -281,6 +291,31 @@ class Settings:
 
 def load_settings() -> Settings:
     path = Path(os.environ.get("JARVIS_CONFIG", DEFAULT_CONFIG))
-    settings = Settings.from_toml(path)
+    settings = apply_automatic_settings(Settings.from_toml(path))
     settings.validate()
+    return settings
+
+
+def apply_automatic_settings(settings: Settings) -> Settings:
+    """Only bootstrap-owned fields still matching the original TOML get an overlay."""
+    if not settings.bootstrap_managed:
+        return settings
+    path = PROJECT_ROOT / "data/bootstrap-auto.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("schema_version") != 1:
+            return settings
+        for name in ("llm_model", "llm_num_ctx", "stt_model", "tts_model"):
+            current = getattr(settings, name)
+            if str(current) != raw.get("baseline", {}).get(name):
+                if name == "llm_model":
+                    settings.llm_auto_model = False
+                continue  # an explicit edit in TOML always wins
+            if name == "llm_model" and not settings.llm_auto_model:
+                continue
+            value = raw.get("selected", {}).get(name)
+            if value is not None:
+                setattr(settings, name, Path(value) if isinstance(current, Path) else int(value) if isinstance(current, int) else str(value))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     return settings

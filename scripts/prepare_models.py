@@ -1,4 +1,4 @@
-r"""Baixa os modelos para models/ (execucao manual, com internet). Nada e baixado na inicializacao.
+r"""Baixa modelos para models/; origens e downloader tambem usados pelo bootstrap.
 
 Uso: .venv\Scripts\python scripts\prepare_models.py [nome ...]
 Padrao: hey_luna whisper-small-q8_0 kokoro
@@ -20,8 +20,12 @@ Padrao: hey_luna whisper-small-q8_0 kokoro
 from __future__ import annotations
 
 import sys
-import urllib.request
 from pathlib import Path
+
+try:
+    from scripts.downloads import download
+except ModuleNotFoundError:
+    from downloads import download
 
 ROOT = Path(__file__).resolve().parents[1]
 OWW_DEST = ROOT / "models" / "openwakeword"
@@ -55,14 +59,9 @@ PIPER_VOICES = {
 def fetch(url: str, target: Path) -> Path:
     if target.exists() and target.stat().st_size > 0:
         print(f"ok      {target.relative_to(ROOT)} (ja existe)")
-        return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".part")
+        return download(url, target)
     print(f"baixando {target.name} ...", flush=True)
-    with urllib.request.urlopen(url, timeout=120) as r, tmp.open("wb") as f:
-        while chunk := r.read(1 << 16):
-            f.write(chunk)
-    tmp.replace(target)
+    download(url, target)
     print(f"ok      {target.relative_to(ROOT)} ({target.stat().st_size // 1024 // 1024} MB)")
     return target
 

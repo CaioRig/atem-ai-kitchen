@@ -65,6 +65,12 @@ audio_ctx = 768
 done_hold_s = 4.0
 
 [llm]
+# Configurações antigas são manuais. O inicializador novo habilita automatic_model.
+# automatic_model = false
+# num_ctx = 0  # zero = política de contexto existente
+# Configurações antigas são manuais. O inicializador novo habilita automatic_model.
+# automatic_model = false
+# num_ctx = 0  # zero = política de contexto existente
 # IA local via Ollama (https://ollama.com), sem nuvem e sem chaves. A inferencia roda no servidor
 # Ryzen. Desative com enabled = false para manter so a transcricao.
 enabled = true

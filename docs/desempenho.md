@@ -25,8 +25,9 @@ Pouca RAM disponível, menos de quatro threads ou RAM desconhecida levam ao perf
 econômico. Desempenho exige pelo menos 12 GiB livres, oito threads e 6 GiB de VRAM;
 os demais casos usam equilibrado. A detecção usa biblioteca padrão, afinidade de
 processo, APIs Windows, `/proc`/cgroup v2 no Linux e `nvidia-smi` com timeout.
-GPU/VRAM AMD/Intel não identificadas permanecem desconhecidas. Driver CUDA detectado
-não é confirmação de que o Ollama está efetivamente usando a GPU.
+GPU/VRAM AMD/Intel não identificadas permanecem desconhecidas. A API CUDA é
+inicializada para verificar o driver; isso não confirma uso da GPU pelo Ollama,
+verificado separadamente pelo bootstrap através de `/api/ps`.
 
 O navegador escolhe separadamente 8 ou 20 fps usando os limites expostos pelo
 navegador; desativa efeitos opcionais no cliente modesto e mantém o microfone.
@@ -48,7 +49,11 @@ memória para contexto, ASR/TTS e sistema, usa a VRAM NVIDIA detectada quando
 disponível e favorece famílias multilíngues conhecidas/quantização. Essa é uma
 estimativa, não um benchmark de qualidade em português. Se nenhum modelo cabe,
 usa o menor instalado e apresenta aviso/recomendação explícita de instalação.
-Nenhum download, pull ou carregamento simultâneo de modelos é solicitado.
+O módulo de desempenho não solicita downloads. O novo inicializador pode preparar
+um modelo quando necessário; ver [inicialização com um comando](inicializacao.md).
+Configurações antigas de modelo são manuais: a seleção automática requer
+`[llm] automatic_model = true` ou uma instalação nova pelo bootstrap. Preferências
+explícitas de modelo não são substituídas quando o modelo fica indisponível.
 Sem catálogo acessível, mantém a configuração original. Ollama continua gerindo
 GPU/offload; não forçamos `num_gpu` nem presumimos aceleração pelo tamanho da RAM.
 

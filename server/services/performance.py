@@ -19,6 +19,7 @@ PROFILES = ("automatic", "economic", "balanced", "performance")
 
 @dataclass
 class Hardware:
+    architecture: str = ""
     os: str = ""
     cpu: str = ""
     cores: int | None = None
@@ -28,11 +29,16 @@ class Hardware:
     ram_available: int | None = None
     gpu: str | None = None
     vram: int | None = None
+    vram_available: int | None = None
+    disk_free: int | None = None
+    acceleration_verified: bool = False
+    inference_gpu_used: bool = False
+    ollama_vram: int = 0
     acceleration: str | None = None
 
 
 def hardware_key(h: Hardware) -> dict:
-    return {k: v for k, v in asdict(h).items() if k != "ram_available"}
+    return {k: v for k, v in asdict(h).items() if k not in ("ram_available", "vram_available", "disk_free", "inference_gpu_used", "ollama_vram")}
 
 
 def _run(args: list[str]) -> str:
@@ -41,7 +47,12 @@ def _run(args: list[str]) -> str:
 
 
 def detect_hardware() -> Hardware:
-    h = Hardware(os=platform.platform(), cpu=platform.processor(), threads=os.cpu_count() or 1)
+    h = Hardware(os=platform.platform(), architecture=platform.machine(), cpu=platform.processor(), threads=os.cpu_count() or 1)
+    try:
+        import shutil
+        h.disk_free = shutil.disk_usage(Path(__file__).resolve().parents[2]).free
+    except OSError:
+        pass
     h.available_threads = h.threads
     try:
         if os.name == "nt":
@@ -97,11 +108,19 @@ def detect_hardware() -> Hardware:
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
         pass  # Unknown stays unknown.
     try:
-        lines = _run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]).splitlines()
-        devices = [(name.strip(), int(memory.strip()) * 1024 ** 2)
-                   for name, memory in (line.rsplit(",", 1) for line in lines)]
-        h.gpu, h.vram = max(devices, key=lambda d: d[1])
-        h.acceleration = "CUDA (driver detectado; uso efetivo depende do Ollama)"
+        lines = _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"]).splitlines()
+        devices = [(name.strip(), int(total.strip()) * 1024 ** 2, int(free.strip()) * 1024 ** 2)
+                   for name, total, free in (line.rsplit(",", 2) for line in lines)]
+        h.gpu, h.vram, h.vram_available = max(devices, key=lambda d: d[1])
+        h.acceleration = "Driver NVIDIA detectado; aceleração ainda não confirmada"
+        try:
+            cuda = ctypes.WinDLL("nvcuda.dll") if os.name == "nt" else ctypes.CDLL("libcuda.so.1")
+            count = ctypes.c_int()
+            h.acceleration_verified = cuda.cuInit(0) == 0 and cuda.cuDeviceGetCount(ctypes.byref(count)) == 0 and count.value > 0
+            if h.acceleration_verified:
+                h.acceleration = "CUDA Driver API inicializada; uso pelo Ollama verificado separadamente"
+        except (OSError, AttributeError):
+            pass
     except (OSError, ValueError, subprocess.SubprocessError):
         pass
     return h
@@ -119,7 +138,7 @@ def initial_profile(h: Hardware) -> str:
     ram = h.ram_available or 0
     if ram < 4 * GIB or h.available_threads < 4:
         return "economic"
-    if ram >= 12 * GIB and h.available_threads >= 8 and (h.vram or 0) >= 6 * GIB:
+    if ram >= 12 * GIB and h.available_threads >= 8 and (h.vram or 0) >= 6 * GIB and h.acceleration_verified:
         return "performance"
     return "balanced"
 
@@ -136,7 +155,7 @@ def choose_model(models: list[dict], h: Hardware | None, profile: str, fallback:
             return fallback
         return min(usable, key=lambda m: m["size"])["name"] if usable else fallback
     budget = max(0, ((h.ram_available or 0) - 2 * GIB) * 0.65)
-    if h.acceleration and h.vram:
+    if h.acceleration_verified and h.vram:
         budget = max(budget, max(0, h.vram - 2 * GIB) * 0.8)
     ceiling = {"economic": 2.5, "balanced": 5, "performance": 10}[profile] * GIB
     candidates = [m for m in usable if m["size"] <= min(budget, ceiling)]
@@ -176,7 +195,7 @@ class PerformancePolicy:
         self.profile = self.preferences["profile"]
         if self.profile == "automatic":
             self.profile = initial_profile(self.hardware)
-        self.context = {"economic": 4096, "balanced": 8192, "performance": 16384}[self.profile]
+        self.context = settings.llm_num_ctx or {"economic": 4096, "balanced": 8192, "performance": 16384}[self.profile]
         self.threads = max(1, min(self.hardware.available_threads - 1, {"economic": 4, "balanced": 8, "performance": 12}[self.profile]))
         if not settings.stt_threads:
             settings.stt_threads = self.threads
@@ -196,6 +215,7 @@ class PerformancePolicy:
                 and selected.get("hardware") == hardware_key(self.hardware)
                 and selected.get("url") == settings.llm_url
                 and selected.get("model") == settings.llm_model
+                and selected.get("configured_context", 0) == settings.llm_num_ctx
                 and selected.get("context") in (4096, 8192, 16384)):
             self.context = min(self.context, selected["context"])
 
@@ -219,7 +239,7 @@ class PerformancePolicy:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix(".tmp")
         temp.write_text(json.dumps({"preferences": prefs, "selected": {"profile": self.profile,
-            "model": self.settings.llm_model, "context": self.context,
+            "model": self.settings.llm_model, "context": self.context, "configured_context": self.settings.llm_num_ctx,
             "hardware": hardware_key(self.hardware), "url": self.settings.llm_url}, "samples": self.samples[-20:]}, ensure_ascii=False), encoding="utf-8")
         temp.replace(self.path)
         if preferences is not None:
@@ -237,7 +257,9 @@ class PerformancePolicy:
                 else:
                     client.name = manual
                     installed_manual = True
-            if not installed_manual:
+            if manual and not installed_manual:
+                client.name = manual  # preserve the explicit choice; check() reports its absence
+            elif not manual and self.settings.llm_auto_model and not self.settings.bootstrap_managed:
                 client.name = choose_model(self.models, self.hardware if self.local else None,
                                            self.profile, client.name)
             self.settings.llm_model = client.name

@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.tools/
 .pytest_cache/
 # Interpretadores instalados pelo gerenciador do Python (nao pertencem ao repo)
 Python/

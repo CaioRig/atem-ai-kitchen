@@ -11,7 +11,7 @@ from server.storage.config import Settings
     (2, 2, 0, "economic"), (8, 6, 0, "balanced"), (24, 16, 8, "performance"),
     (2, 16, 8, "economic"), (32, 2, 0, "economic"), (None, 8, 0, "economic")])
 def test_profiles(ram, threads, vram, expected):
-    h = Hardware(ram_available=ram * GIB if ram else None, available_threads=threads, vram=vram * GIB)
+    h = Hardware(ram_available=ram * GIB if ram else None, available_threads=threads, vram=vram * GIB, acceleration_verified=bool(vram))
     assert initial_profile(h) == expected
 
 
@@ -31,7 +31,7 @@ def test_model_selection_and_remote_boundary():
 
 def policy(tmp_path, **kwargs):
     settings = Settings(performance_path=tmp_path / "performance.json", **kwargs)
-    return PerformancePolicy(settings, Hardware(ram_available=16 * GIB, available_threads=12, vram=8 * GIB))
+    return PerformancePolicy(settings, Hardware(ram_available=16 * GIB, available_threads=12, vram=8 * GIB, acceleration_verified=True))
 
 
 def test_preferences_roundtrip_reset_and_bad_file(tmp_path):
@@ -62,12 +62,21 @@ def test_dynamic_context_has_hysteresis_and_respects_manual_remote(tmp_path):
     assert client.num_ctx == 8192
 
 
-def test_no_download_and_missing_manual_falls_back(tmp_path):
+def test_measured_context_survives_bootstrap_overlay_but_new_manual_value_wins(tmp_path):
+    p = policy(tmp_path, llm_num_ctx=16384)
+    client = SimpleNamespace(num_ctx=16384, last_metrics={"ttft_s": 10})
+    for _ in range(3):
+        p.observe(client)
+    assert policy(tmp_path, llm_num_ctx=16384).context == 8192
+    assert policy(tmp_path, llm_num_ctx=32768).context == 32768
+
+
+def test_no_download_and_missing_manual_is_preserved(tmp_path):
     p = policy(tmp_path)
     p.preferences["model"] = "missing"
     client = SimpleNamespace(name="missing", list_models=lambda: MODELS, keep_alive="10m")
     p.configure_llm(client)
-    assert client.name == "qwen2.5:7b"
+    assert client.name == "missing"
     assert any("ollama pull missing" in n for n in p.notices)
 
 

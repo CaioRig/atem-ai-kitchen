@@ -76,6 +76,8 @@ def local_url_problem(url: str) -> str:
     """Explica por que `url` não serve para o Ollama (vazio = aceitável). Só aceita endereços da
     rede local: loopback, IPs privados ou nomes de máquina sem domínio público."""
     parts = urlsplit(url)
+    if parts.username is not None or parts.password is not None:
+        return "Não inclua credenciais na URL do Ollama; informe somente o endereço local"
     if parts.scheme not in ("http", "https"):
         return f"use http:// ou https:// (recebido: {url!r})"
     host = parts.hostname
