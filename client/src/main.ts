@@ -100,6 +100,7 @@ function setupCommon(): { panel: Panel; face: PixelFace } {
     }
   }, 1000);
   document.addEventListener("keydown", (ev) => {
+    if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
     if (ev.key === "f") void document.documentElement.requestFullscreen?.();
   });
   return { panel, face };
@@ -135,6 +136,7 @@ function setupMic(
   };
   panel.onMicToggle(toggle);
   document.addEventListener("keydown", (ev) => {
+    if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
     if (ev.key === "m") toggle();
   });
   if (localStorage.getItem(MIC_KEY) === "off") panel.setMic("off");
@@ -163,6 +165,7 @@ function runLocal(panel: Panel, face: PixelFace): void {
   );
   apply();
   document.addEventListener("keydown", (ev) => {
+    if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
     const next = DEBUG_KEYS[ev.key];
     if (next) {
       state = next;
@@ -386,6 +389,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
   panel.onMemoryDelete((id) => socket.send({ type: "memory_delete", id }));
   panel.onMemoryClear(() => socket.send({ type: "memory_clear", confirm: true }));
   document.addEventListener("keydown", (ev) => {
+    if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
     if (ev.key === "Escape") {
       if (panel.memoryVisible) return panel.setMemoryVisible(false);
       return cancel();

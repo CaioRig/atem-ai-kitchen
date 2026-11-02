@@ -29,27 +29,25 @@ capturado do pedido explícito, sem memória, estoque, histórico ou áudio.
 
 ## Busca e reprodução
 
-Não existia integração de vídeo. Foi adotada a API oficial YouTube Data API v3,
-opcional, com até três resultados e filtro de vídeos incorporáveis. A aplicação
-não ativa faturamento, não contrata serviços e não contorna cotas do provedor.
-É necessário criar credencial própria, habilitar a API e respeitar a cota disponível.
+A busca abre a página oficial do YouTube em outra aba, após toque em
+**Pesquisar no YouTube**. O botão **Vídeos no YouTube** permite iniciar pela
+interface; pedidos por voz preenchem o tema, incluindo acentos. Não há chave,
+conta de desenvolvedor, assinatura ou cobrança por requisição pela Luna.
 
-A chave fica somente no servidor, na variável de ambiente `LUNA_YOUTUBE_API_KEY`.
-Defina-a no ambiente do processo que inicia a Luna e reinicie o servidor. Não a
-coloque na URL do quiosque, no código ou no Git. A chave não é enviada ao navegador
-nem registrada nos logs. Em inicialização pelo Agendador, o ambiente do usuário
-deve estar atualizado antes de iniciar a tarefa.
+Os resultados e sua seleção ficam no site oficial. A Luna não lê essa página:
+“abra o primeiro vídeo” informa a limitação quando não há uma lista local.
+Pause/continue não controlam a outra aba. Feche essa aba para voltar à Luna.
+Opcionalmente, cole um link HTTPS do YouTube no campo **Assistir aqui** para
+usar o player oficial incorporado e seus controles por voz. Links inválidos,
+domínios diferentes e IDs malformados são recusados. Vídeos com restrições de
+incorporação continuam dependendo do site oficial.
 
-**Sem chave**, a Luna informa que a busca integrada não está configurada e oferece
-**Pesquisar no YouTube**, um link que abre outra aba apenas após toque. Não há
-resultados fabricados nem seleção automática nesse modo. O mesmo caminho fica
-disponível em caso de erro de rede/cota ou resultados vazios.
-
-**Com chave e resultados**, a seleção abre o player oficial IFrame API dentro da
-área principal. IDs são validados e links são construídos apenas para YouTube.
-Nenhum HTML do modelo ou da fonte é injetado. Scripts externos só são carregados
-após selecionar um vídeo. A busca e a reprodução exigem internet e comunicam-se
-com o Google/YouTube, incluindo os metadados normais da conexão do navegador.
+A busca não faz chamadas de rede no servidor e não envia histórico, memória ou
+áudio ao YouTube. O navegador envia o tema ao abrir o formulário. Sem conexão
+indicada pelo navegador, a Luna impede a abertura e informa o problema. Outras
+falhas de rede e ausência de resultados são mostradas pelo próprio YouTube;
+a Luna não consegue diagnosticar o conteúdo da outra aba. Funções offline
+continuam independentes. Nenhum vídeo é baixado nem proxy público é utilizado.
 
 O player inicia sem autoplay; use o botão nativo de reprodução ou peça para
 continuar. Autoplay bloqueado, erro do player ou falta de carregamento produzem
@@ -58,23 +56,19 @@ Fechar/substituir destrói o player e interrompe o áudio. Iniciar vídeo interr
 a fala da Luna; ativação de voz e nova fala pausam o vídeo. O vídeo não retoma
 sozinho após uma pergunta. É necessário validar falsas ativações e eco no LG.
 
-Fontes oficiais verificadas:
-- [Busca de vídeos](https://developers.google.com/youtube/v3/docs/search/list)
-- [Credenciais e configuração](https://developers.google.com/youtube/v3/getting-started)
-- [Player, controle e erros](https://developers.google.com/youtube/iframe_api_reference)
+Alternativas, termos e limitações: [YouTube sem chave](youtube-sem-chave.md).
 
 ## Verificação
 
-- Python: `tests/test_videos.py` verifica reconhecimento explícito, ausência de
-  chave, resultados validados, fonte vazia, erros e desvio do Ollama.
-- `npm test` compila e testa o cliente.
-- `node scripts/check_ui.cjs`: Chrome headless nas resoluções documentadas,
-  toque emulado, textos longos, controles, painéis e preferências.
-- `node scripts/check_stage.cjs`: resposta/receita, rolagem, prazo do clima,
-  substituição sem prazo antigo, fechamento, resultados, seleção, pausa,
-  autoplay/erros e destruição do player. Backend e player são simulados nesse teste.
-  Usa a instalação isolada do Playwright descrita em `docs/interface.md`.
+- Python: reconhecimento explícito em português, preparação sem rede/credenciais
+  e desvio do Ollama em `tests/test_videos.py`.
+- `npm test`: compilação TypeScript e testes, incluindo validação de URLs.
+- `node scripts/check_ui.cjs`: Chrome headless em seis resoluções, toque emulado,
+  textos longos, controles, painéis e preferências.
+- `node scripts/check_stage.cjs`: navegação da busca em português, toque,
+  desconexão, link inválido/válido, seleção, pausa, erro e destruição do player,
+  além de resposta/receita e clima. Backend, página externa e player simulados.
 
-Nesta máquina não havia chave de busca configurada. A consulta real à API e a
-reprodução de vídeos externos ainda precisam de validação com credencial e rede;
-os testes não equivalem a reprodução real nem a voz/toque físicos no LG.
+Reprodução real, disponibilidade do YouTube, voz física e toque no computador
+da cozinha exigem validação no equipamento com internet. Nenhum teste simulado
+comprova esses aspectos.

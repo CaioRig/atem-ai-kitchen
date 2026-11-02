@@ -25,6 +25,20 @@ export function validVideo(item: VideoItem): boolean {
     && typeof item.title === "string" && typeof item.source === "string";
 }
 
+export function youtubeVideoId(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return;
+    let id: string | null = null;
+    if (url.hostname === "youtu.be" && url.pathname.split("/").length === 2) id = url.pathname.slice(1);
+    else if (["youtube.com", "www.youtube.com", "m.youtube.com"].includes(url.hostname)) {
+      if (url.pathname === "/watch") id = url.searchParams.get("v");
+      else if (/^\/(shorts|embed)\/[^/]+$/.test(url.pathname)) id = url.pathname.split("/")[2];
+    }
+    return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : undefined;
+  } catch { return; }
+}
+
 export class StageView {
   mode: StageMode = "face";
   private version = 0;
@@ -39,6 +53,7 @@ export class StageView {
   private readonly title = document.getElementById("stage-title")!;
   constructor(private notice: (text: string) => void) {
     document.getElementById("stage-back")!.addEventListener("click", () => this.close());
+    document.getElementById("video-search")!.addEventListener("click", () => this.results("", [], "Pesquise no site oficial e escolha o vídeo por toque. Para assistir aqui, você também pode colar o link de um vídeo."));
   }
   begin(): void { this.ignoreReplies = false; this.transition("face", ""); }
   private transition(mode: StageMode, title: string): void {
@@ -85,7 +100,7 @@ export class StageView {
     this.ignoreReplies = false;
     this.transition("results", "Vídeos de receitas");
     this.items = items.filter(validVideo).slice(0, 3);
-    this.renderText(message || "Escolha um vídeo por toque ou diga: abra o primeiro vídeo.");
+    this.renderText(message || (this.items.length ? "Escolha um vídeo por toque ou diga: abra o primeiro vídeo." : "Pesquise no site oficial. Os resultados e a seleção ficam na outra aba."));
     this.items.forEach((item, index) => {
       const button = document.createElement("button");
       button.className = "pill video-result";
@@ -93,7 +108,41 @@ export class StageView {
       button.addEventListener("click", () => { void this.select(index); });
       this.scroll.append(button);
     });
-    this.link("Pesquisar no YouTube (abre outra aba)", "https://www.youtube.com/results?search_query=" + encodeURIComponent(query.slice(0, 160)));
+    const form = document.createElement("form");
+    form.action = "https://www.youtube.com/results"; form.method = "get"; form.target = "_blank";
+    form.setAttribute("rel", "noopener noreferrer");
+    const label = document.createElement("label"); label.textContent = "O que você quer assistir?";
+    const input = document.createElement("input"); input.name = "search_query"; input.type = "search";
+    input.value = query.slice(0, 160); input.maxLength = 160; input.required = true;
+    label.append(input);
+    const button = document.createElement("button"); button.type = "submit"; button.className = "pill";
+    button.textContent = "Pesquisar no YouTube · outra aba";
+    form.append(label, button);
+    for (const [name, value] of [["hl", "pt-BR"], ["gl", "BR"]]) {
+      const hidden = document.createElement("input"); hidden.type = "hidden"; hidden.name = name; hidden.value = value; form.append(hidden);
+    }
+    form.addEventListener("submit", event => {
+      input.value = input.value.trim();
+      if (!input.value || !navigator.onLine) {
+        event.preventDefault(); this.notice(input.value ? "Sem conexão. Tente novamente quando a internet voltar." : "Informe um tema para pesquisar."); return;
+      }
+      document.dispatchEvent(new Event("luna:video-play")); this.pause(true);
+    });
+    this.scroll.append(form);
+    const linkForm = document.createElement("form");
+    const linkLabel = document.createElement("label"); linkLabel.textContent = "Opcional: link do vídeo para assistir na Luna";
+    const linkInput = document.createElement("input"); linkInput.type = "url"; linkInput.placeholder = "https://www.youtube.com/watch?v=…"; linkInput.required = true;
+    linkLabel.append(linkInput);
+    const open = document.createElement("button"); open.type = "submit"; open.className = "pill"; open.textContent = "Assistir aqui";
+    linkForm.append(linkLabel, open);
+    linkForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const id = youtubeVideoId(linkInput.value.trim());
+      if (!id) return this.notice("Use um link HTTPS de um vídeo do YouTube ou youtu.be.");
+      this.items = [{ id, title: "Vídeo informado por você", source: "YouTube" }];
+      void this.select(0);
+    });
+    this.scroll.append(linkForm);
   }
   private link(label: string, url: string): void {
     const link = document.createElement("a");
@@ -103,7 +152,7 @@ export class StageView {
   }
   async select(index: number): Promise<void> {
     const item = this.items[index];
-    if (this.mode !== "results" || !item || !validVideo(item)) return this.notice("Nenhum resultado disponível nessa posição");
+    if (this.mode !== "results" || !item || !validVideo(item)) return this.notice("Escolha o vídeo no YouTube. A Luna não lê os resultados da outra aba.");
     this.transition("video", item.title);
     const version = this.version;
     document.dispatchEvent(new Event("luna:video-play"));

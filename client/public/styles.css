@@ -413,6 +413,9 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9cdfff; outline
 #stage-scroll iframe { width: 100%; min-height: 200px; border: 0; aspect-ratio: 16 / 9; }
 .video-result, .external-video { display: block; width: 100%; text-align: left; margin: 12px 0; white-space: normal; overflow-wrap: anywhere; }
 .external-video { min-height: 48px; padding: 12px; font-size: 1rem; color: #9cdfff; }
+#stage-scroll form { display: grid; gap: 12px; margin: 20px 0; padding-top: 16px; border-top: 1px solid #293d56; }
+#stage-scroll label { display: grid; gap: 8px; }
+#stage-scroll input:not([type="hidden"]) { min-height: 48px; min-width: 0; width: 100%; border: 1px solid #496481; border-radius: 12px; background: #141f2f; color: var(--text); padding: 10px; font: inherit; }
 .show-content #stage { display: flex; }
 .show-content .brand { padding: 12px 20px 4px; font-size: 1rem; }
 .show-content .brand span { display: none; }
