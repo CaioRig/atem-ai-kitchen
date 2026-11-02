@@ -40,7 +40,7 @@ def installation(tmp_path, monkeypatch):
     monkeypatch.setattr(boot, "detect_hardware", lambda: h)
     monkeypatch.setattr(boot, "ensure_ollama", lambda *a: models)
     monkeypatch.setattr(boot, "installed_models", lambda *a: models)
-    monkeypatch.setattr(boot, "api", lambda *a: {"version": "test-version"})
+    monkeypatch.setattr(boot, "api", lambda *a, **kw: {"version": "test-version"})
     monkeypatch.setattr(boot, "update_acceleration", lambda *a: None)
     def quality(settings, h, **kw):
         boot.write_json(settings.llm_quality_path, {"schema_version": 1, "reports": {}, "last_good": [settings.llm_model],
@@ -103,6 +103,7 @@ def test_hardware_change_selects_only_needed_smaller_model(installation):
     assert calls["pull"] == ["qwen2.5:1.5b"]
     assert result["settings"].stt_model.name == "ggml-base.bin"
     assert result["settings"].tts_model.name == "kokoro-v1.0.int8.onnx"
+    assert result["settings"].llm_num_ctx == 2048
     boot.prepare(root, options, [])
     assert calls["pull"] == ["qwen2.5:1.5b"]
 
@@ -196,14 +197,13 @@ def test_invalid_model_disables_only_ai_and_preserves_last_approval(installation
     root, calls, h, models, options = installation
     first = boot.prepare(root, options, [])
     previous_quality = first["state"]["quality"]
-    previous_overlay = boot.read_json(root / "data/bootstrap-auto.json")
     monkeypatch.setattr(boot, "validate_model_selection", lambda *a, **kw: (_ for _ in ()).throw(boot.BootstrapError("modelo corrompido")))
     result = boot.prepare(root, options, [])
     assert not result["settings"].llm_enabled
     assert result["settings"].tts_enabled
     assert result["state"]["quality"] == previous_quality
     assert result["state"]["llm_status"]["available"] is False
-    assert boot.read_json(root / "data/bootstrap-auto.json")["selected"]["llm_model"] == previous_overlay["selected"]["llm_model"]
+    assert "llm_model" not in boot.read_json(root / "data/bootstrap-auto.json")["selected"]
 
 
 def test_remote_service_failure_never_installs_locally(tmp_path, monkeypatch):
@@ -390,9 +390,9 @@ def test_quality_failure_tries_only_next_compatible_candidate(installation, monk
         return {"model": s.llm_model, "approval_key": "passed"}
     monkeypatch.setattr(boot, "validate_model_selection", validate)
     report = boot.prepare_llm(settings, CATALOG, h, {}, False)
-    assert attempted == ["qwen2.5:7b", "qwen2.5:1.5b"]
-    assert calls["pull"] == ["qwen2.5:1.5b"]
-    assert report["quality"]["model"] == settings.llm_model == "qwen2.5:1.5b"
+    assert attempted == ["qwen2.5:7b", "qwen3:1.7b"]
+    assert calls["pull"] == ["qwen3:1.7b"]
+    assert report["quality"]["model"] == settings.llm_model == "qwen3:1.7b"
 
 
 def test_manual_rejection_preserves_choice_and_never_downloads_alternative(installation, monkeypatch):
@@ -405,11 +405,29 @@ def test_manual_rejection_preserves_choice_and_never_downloads_alternative(insta
     assert calls["pull"] == []
 
 
+def test_pull_failure_tries_different_family_with_bounded_memory(installation, monkeypatch):
+    root, calls, h, models, options = installation
+    models.clear()
+    h.ram_available = 4 * GIB
+    settings = Settings(llm_auto_model=True, performance_path=root / "prefs.json")
+    attempted = []
+    original_pull = boot.pull_model
+    def pull(url, name, *args):
+        attempted.append(name)
+        if name == "qwen2.5:1.5b":
+            raise boot.BootstrapError("simulated download interruption")
+        return original_pull(url, name, *args)
+    monkeypatch.setattr(boot, "pull_model", pull)
+    report = boot.prepare_llm(settings, CATALOG, h, {}, False)
+    assert attempted == ["qwen2.5:1.5b", "gemma3:1b"]
+    assert report["quality"]["model"] == "gemma3:1b"
+
+
 def test_offline_unknown_local_model_is_never_newly_approved(installation):
     root, calls, h, models, options = installation
     settings = Settings(llm_auto_model=True, llm_quality_path=root / "quality.json",
                         performance_path=root / "prefs.json")
-    with pytest.raises(boot.BootstrapError):
+    with pytest.raises(boot.BootstrapError, match="aprovação salva"):
         boot.prepare_llm(settings, CATALOG, h, {}, True)
     assert calls["pull"] == [] and calls["probe"] == []
 
@@ -502,3 +520,58 @@ def test_explicit_context_is_preserved_and_budgeted(installation):
     # 7B's 8K estimate cannot silently be reused for a 16K explicit request.
     name, _ = boot.configure_models(settings, CATALOG, h, {}, False)
     assert name == "qwen2.5:1.5b" and settings.llm_num_ctx == 16384
+
+
+def test_economic_empty_ollama_downloads_and_persists_small_candidate(installation, caplog):
+    root, calls, h, models, options = installation
+    h.cpu = "AMD A12-9720P"
+    h.ram_total, h.ram_available, h.available_threads = 7 * GIB, 3 * GIB, 4
+    h.gpu = "AMD Radeon R7 Graphics"
+    models.clear()
+    first = boot.prepare(root, options, [])
+    assert first["state"]["profile"] == "economic"
+    assert first["settings"].llm_enabled
+    assert first["state"]["model"] == "qwen2.5:1.5b"
+    assert calls["pull"] == ["qwen2.5:1.5b"]
+    loaded = apply_automatic_settings(Settings.from_toml(root / "config/settings.toml"))
+    assert loaded.llm_model == "qwen2.5:1.5b"
+    boot.prepare(root, options, [])
+    assert calls["pull"] == ["qwen2.5:1.5b"]
+
+
+def test_two_gib_free_uses_half_billion_and_insufficient_memory_disables(installation, caplog):
+    root, calls, h, models, options = installation
+    h.ram_available, h.available_threads = 2 * GIB, 4
+    models.clear()
+    first = boot.prepare(root, options, [])
+    assert first["settings"].llm_enabled
+    assert first["state"]["model"] == "qwen2.5:0.5b"
+    assert calls["pull"] == ["qwen2.5:0.5b"]
+    h.ram_available = GIB // 2
+    second = boot.prepare(root, options, [])
+    assert not second["settings"].llm_enabled
+    assert second["state"]["model"] is None
+    assert "Memória" in second["state"]["llm_status"]["reason"]
+    assert "IA=qwen2.5:7b" not in caplog.text
+    assert "llm_model" not in boot.read_json(root / "data/bootstrap-auto.json")["selected"]
+    assert calls["pull"] == ["qwen2.5:0.5b"]
+    h.ram_available = 2 * GIB
+    assert boot.prepare(root, options, [])["settings"].llm_enabled
+
+
+def test_memory_failure_unloads_and_falls_back_only_to_smaller_model(installation, monkeypatch):
+    root, calls, h, models, options = installation
+    h.ram_available, h.available_threads = 3 * GIB, 4
+    models.clear()
+    attempted, unloaded = [], []
+    def validate(s, h, **kw):
+        attempted.append(s.llm_model)
+        if s.llm_model == "qwen2.5:1.5b":
+            raise boot.BootstrapError("memory_insufficient")
+        return {"model": s.llm_model, "approval_key": "simulated"}
+    monkeypatch.setattr(boot, "validate_model_selection", validate)
+    monkeypatch.setattr(boot, "api", lambda url, path, *args, **kw: unloaded.append(path) or {})
+    result = boot.prepare(root, options, [])
+    assert attempted == ["qwen2.5:1.5b", "gemma3:1b"]
+    assert "/api/generate" in unloaded
+    assert result["state"]["model"] == "gemma3:1b"

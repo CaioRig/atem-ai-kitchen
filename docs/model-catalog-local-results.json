@@ -1,0 +1,494 @@
+{
+  "date": "2026-11-02",
+  "hardware": "AMD A12-9720P, 4 threads, 6.96 GiB RAM; Windows",
+  "conditions": "Perfil economico; contexto 2048; keep_alive=0; descarrega por resposta. Ambiente desktop sem isolamento de carga. RSS/CPU da primeira suite excluidos por omissao do runner no coletor inicial.",
+  "selected_model": null,
+  "reports": [
+    {
+      "model": "qwen2.5:1.5b",
+      "profile": "economic",
+      "approved": false,
+      "tested_cases": 15,
+      "expected_cases": 15,
+      "passed_cases": 3,
+      "total_s": 366.31665419973433,
+      "identity": {
+        "model": "qwen2.5:1.5b",
+        "digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+        "template_sha256": "78b33556a364c601b7682ec3deee5536919cd9b1873cc5998a99491c6a2f2ddc",
+        "model_parameters_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen2",
+          "families": [
+            "qwen2"
+          ],
+          "parameter_size": "1.5B",
+          "quantization_level": "Q4_K_M"
+        },
+        "ollama_version": "0.40.13",
+        "signature": "a5043267fa3aa5a8f735e4205afeb43abb0400fafeaaa82e2a824bb19f11c2ce",
+        "suite": 6,
+        "backend": {
+          "architecture": "AMD64",
+          "os": "Windows-10-10.0.19045-SP0",
+          "cpu": "AMD A12-9720P RADEON R7, 12 COMPUTE CORES 4C+8G",
+          "cores": 4,
+          "threads": 4,
+          "available_threads": 4,
+          "ram_total": 7471484928,
+          "gpu": "Radeon 500 Series; Parsec Virtual Display Adapter; AMD Radeon R7 Graphics",
+          "vram": null,
+          "acceleration_verified": false,
+          "acceleration": null
+        },
+        "finetune": "Instruct"
+      },
+      "tests": [
+        {
+          "case": "greeting",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 20.601278899703175,
+          "metrics": {}
+        },
+        {
+          "case": "identity",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 30.112785700242966,
+          "metrics": {}
+        },
+        {
+          "case": "conversation",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 21.446829499676824,
+          "metrics": {}
+        },
+        {
+          "case": "math20",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 19.88176319980994,
+          "metrics": {}
+        },
+        {
+          "case": "stop_music",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.25287549989297986,
+          "metrics": {}
+        },
+        {
+          "case": "weather",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.0015026000328361988,
+          "metrics": {}
+        },
+        {
+          "case": "capital",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 19.436821000184864,
+          "metrics": {}
+        },
+        {
+          "case": "context",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 22.733403800055385,
+          "metrics": {}
+        },
+        {
+          "case": "cooking",
+          "passed": false,
+          "reason": "objective_cooking",
+          "failure_kind": "quality",
+          "total_s": 129.0646865000017,
+          "metrics": {
+            "ttft_s": 35.110253899823874,
+            "total_s": 129.05529449973255,
+            "tokens_per_s": 6.3868375283377326,
+            "load_s": 14.5607003,
+            "model": "qwen2.5:1.5b"
+          }
+        },
+        {
+          "case": "instruction",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 19.831234900280833,
+          "metrics": {}
+        },
+        {
+          "case": "unknown",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 21.299286799971014,
+          "metrics": {}
+        },
+        {
+          "case": "language",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 20.47360089980066,
+          "metrics": {}
+        },
+        {
+          "case": "simple_math",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 20.151576899923384,
+          "metrics": {}
+        },
+        {
+          "case": "simple_instruction",
+          "passed": false,
+          "reason": "corrupt_response",
+          "failure_kind": "quality",
+          "total_s": 20.759880000259727,
+          "metrics": {}
+        },
+        {
+          "case": "music",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.0008054999634623528,
+          "metrics": {}
+        }
+      ]
+    },
+    {
+      "model": "gemma3:1b",
+      "profile": "economic",
+      "approved": false,
+      "tested_cases": 15,
+      "expected_cases": 15,
+      "passed_cases": 9,
+      "total_s": 275.7177675999701,
+      "identity": {
+        "model": "gemma3:1b",
+        "digest": "97558784bdc9175075a72655bf360b15da17df6b3b9e5182af9f8c0c8e58ba7c",
+        "template_sha256": "d41b61e74f6b0cf7f237244ca5750d17f2240ba69935a9e49bdcbeb875c2309b",
+        "model_parameters_sha256": "debf852cef46f7d73b1ed0e86e14948266c46ae905cd588241cb2d29e59f4212",
+        "details": {
+          "parent_model": "dhiltgen/gemma3:1b-it-q4_K_M-llamacpp",
+          "format": "gguf",
+          "family": "gemma3",
+          "families": [
+            "gemma3"
+          ],
+          "parameter_size": "999.89M",
+          "quantization_level": "Q4_K_M",
+          "runner": "llamacpp"
+        },
+        "ollama_version": "0.40.13",
+        "signature": "65a05356dec861c191168125ba0fc1ad47e878a7f1187ae4dc718ad0ab911678",
+        "suite": 6,
+        "backend": {
+          "architecture": "AMD64",
+          "os": "Windows-10-10.0.19045-SP0",
+          "cpu": "AMD A12-9720P RADEON R7, 12 COMPUTE CORES 4C+8G",
+          "cores": 4,
+          "threads": 4,
+          "available_threads": 4,
+          "ram_total": 7471484928,
+          "gpu": "Radeon 500 Series; Parsec Virtual Display Adapter; AMD Radeon R7 Graphics",
+          "vram": null,
+          "acceleration_verified": false,
+          "acceleration": null
+        },
+        "finetune": "it"
+      },
+      "tests": [
+        {
+          "case": "greeting",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 26.917343699838966,
+          "metrics": {
+            "ttft_s": 25.6752486997284,
+            "total_s": 26.903641399927437,
+            "tokens_per_s": 8.956166890842237,
+            "load_s": 17.5897883,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "identity",
+          "passed": false,
+          "reason": "objective_identity",
+          "failure_kind": "quality",
+          "total_s": 25.53433350007981,
+          "metrics": {
+            "ttft_s": 25.02908630017191,
+            "total_s": 25.531498100142926,
+            "tokens_per_s": 11.951762685800112,
+            "load_s": 18.2235908,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "conversation",
+          "passed": false,
+          "reason": "objective_conversation",
+          "failure_kind": "quality",
+          "total_s": 18.61191549990326,
+          "metrics": {
+            "ttft_s": 16.365893099922687,
+            "total_s": 18.60803320026025,
+            "tokens_per_s": 11.152573902530964,
+            "load_s": 13.5815916,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "math20",
+          "passed": false,
+          "reason": "objective_math20",
+          "failure_kind": "quality",
+          "total_s": 15.357921900227666,
+          "metrics": {
+            "ttft_s": 14.499093399848789,
+            "total_s": 15.354232800193131,
+            "tokens_per_s": 11.320207929579249,
+            "load_s": 11.6103557,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "stop_music",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.0002005002461373806,
+          "metrics": {}
+        },
+        {
+          "case": "weather",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.0005076001398265362,
+          "metrics": {}
+        },
+        {
+          "case": "capital",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 15.914582499768585,
+          "metrics": {
+            "ttft_s": 15.243667499627918,
+            "total_s": 15.911733699962497,
+            "tokens_per_s": 11.980513694475935,
+            "load_s": 12.4385841,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "context",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 32.94315619999543,
+          "metrics": {
+            "ttft_s": 15.944755299948156,
+            "total_s": 16.409383800346404,
+            "tokens_per_s": 12.928693943337844,
+            "load_s": 13.1351957,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "cooking",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 52.00775730004534,
+          "metrics": {
+            "ttft_s": 22.5051863999106,
+            "total_s": 52.00173699995503,
+            "tokens_per_s": 10.10280930649096,
+            "load_s": 12.7062579,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "instruction",
+          "passed": false,
+          "reason": "empty",
+          "failure_kind": "quality",
+          "total_s": 15.677476100157946,
+          "metrics": {
+            "ttft_s": null,
+            "total_s": 15.674910000059754,
+            "tokens_per_s": 1000000.0,
+            "load_s": 12.8811186,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "unknown",
+          "passed": false,
+          "reason": "objective_unknown",
+          "failure_kind": "quality",
+          "total_s": 15.730350499972701,
+          "metrics": {
+            "ttft_s": 14.864941600244492,
+            "total_s": 15.725866800174117,
+            "tokens_per_s": 11.623311713973546,
+            "load_s": 12.1012262,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "language",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 18.636793399695307,
+          "metrics": {
+            "ttft_s": 15.102845899760723,
+            "total_s": 18.628039199858904,
+            "tokens_per_s": 11.064058915262642,
+            "load_s": 12.2516133,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "simple_math",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 19.27859380003065,
+          "metrics": {
+            "ttft_s": 18.524993299972266,
+            "total_s": 19.275012699887156,
+            "tokens_per_s": 12.007220341832221,
+            "load_s": 15.7282949,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "simple_instruction",
+          "passed": false,
+          "reason": "objective_simple_instruction",
+          "failure_kind": "quality",
+          "total_s": 18.83378060022369,
+          "metrics": {
+            "ttft_s": 18.52272089989856,
+            "total_s": 18.81176030030474,
+            "tokens_per_s": 13.865731192002247,
+            "load_s": 15.7219612,
+            "model": "gemma3:1b"
+          }
+        },
+        {
+          "case": "music",
+          "passed": true,
+          "reason": "",
+          "failure_kind": "",
+          "total_s": 0.0005279001779854298,
+          "metrics": {}
+        }
+      ]
+    },
+    {
+      "model": "qwen2.5:0.5b",
+      "profile": "economic",
+      "approved": false,
+      "tested_cases": 1,
+      "expected_cases": 15,
+      "passed_cases": 0,
+      "total_s": 13.250413900241256,
+      "identity": {
+        "model": "qwen2.5:0.5b",
+        "digest": "a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67",
+        "template_sha256": "78b33556a364c601b7682ec3deee5536919cd9b1873cc5998a99491c6a2f2ddc",
+        "model_parameters_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen2",
+          "families": [
+            "qwen2"
+          ],
+          "parameter_size": "494.03M",
+          "quantization_level": "Q4_K_M"
+        },
+        "ollama_version": "0.40.13",
+        "signature": "6aa92e56dcec26e65c6ed1e36d2689dbeb73ce0450f6708485481fd461fea74b",
+        "suite": 6,
+        "backend": {
+          "architecture": "AMD64",
+          "os": "Windows-10-10.0.19045-SP0",
+          "cpu": "AMD A12-9720P RADEON R7, 12 COMPUTE CORES 4C+8G",
+          "cores": 4,
+          "threads": 4,
+          "available_threads": 4,
+          "ram_total": 7471484928,
+          "gpu": "Radeon 500 Series; Parsec Virtual Display Adapter; AMD Radeon R7 Graphics",
+          "vram": null,
+          "acceleration_verified": false,
+          "acceleration": null
+        },
+        "finetune": "Instruct"
+      },
+      "tests": [
+        {
+          "case": "greeting",
+          "passed": false,
+          "reason": "server",
+          "failure_kind": "infrastructure",
+          "total_s": 13.054292199667543,
+          "metrics": {}
+        }
+      ]
+    }
+  ],
+  "corrected_single_prompt_resource_probe": {
+    "model": "gemma3:1b",
+    "prompt": "Bom dia, Luna!",
+    "purpose": "coleta isolada de recursos; nao concede aprovacao",
+    "options": {
+      "temperature": 0.7,
+      "num_predict": 128,
+      "num_ctx": 2048,
+      "num_thread": 3
+    },
+    "answer": "Bom dia! 😊 Em que posso ajudar hoje?",
+    "metrics": {
+      "ttft_s": 15.305781699717045,
+      "total_s": 16.26520220004022,
+      "tokens_per_s": 11.433917156072969,
+      "load_s": 12.499864,
+      "model": "gemma3:1b"
+    },
+    "resources": {
+      "peak_ram_bytes": 1373696000,
+      "cpu_percent": 24.48374274169074,
+      "gpu_percent": null,
+      "sample_interval_s": 0.5,
+      "samples": 33,
+      "scope": "soma RSS dos processos Ollama locais; pico amostrado; CPU pode subestimar processos encerrados"
+    }
+  }
+}

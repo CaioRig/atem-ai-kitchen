@@ -30,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--without-llm", action="store_true", help="iniciar os demais serviços sem a IA nesta execução")
     parser.add_argument("--validated-llm", action="store_true", help="exigir aprovação salva pelo inicializador, sem repetir testes")
+    parser.add_argument("--llm-model", help="modelo aprovado pelo inicializador")
+    parser.add_argument("--llm-context", type=int, help="contexto aprovado pelo inicializador")
+    parser.add_argument("--llm-threads", type=int, help="threads aprovadas pelo inicializador")
     args = parser.parse_args(argv)
     try:
         settings = load_settings()
@@ -39,6 +42,16 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(settings.log_level, settings.log_dir)
     if args.without_llm:
         settings.llm_enabled = False
+    if args.validated_llm:
+        if args.llm_model:
+            settings.llm_model = args.llm_model
+        if args.llm_context is not None:
+            settings.llm_num_ctx = args.llm_context
+        if args.llm_threads is not None:
+            settings.llm_runtime_threads = args.llm_threads
+        settings.validate()
+        logging.getLogger("jarvis.main").info("IA aprovada pelo inicializador: modelo=%s; contexto=%s; threads=%s",
+            settings.llm_model, settings.llm_num_ctx, settings.llm_runtime_threads)
     settings.llm_quality_cached_only = args.validated_llm
     app = create_app(settings)
     tls: dict[str, str] = {}

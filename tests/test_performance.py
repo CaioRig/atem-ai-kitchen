@@ -15,6 +15,22 @@ def test_profiles(ram, threads, vram, expected):
     assert initial_profile(h) == expected
 
 
+def test_economic_inference_matches_bootstrap_and_server(tmp_path, monkeypatch):
+    from server.services.llm import OllamaClient
+    from server.services.model_quality import configured_client, local_signature
+    settings = Settings(performance_path=tmp_path / "performance.json", llm_model="qwen2.5:0.5b")
+    hardware = Hardware(ram_available=2 * GIB, available_threads=4)
+    probe = configured_client(settings, hardware)
+    runtime = OllamaClient(settings.llm_url, settings.llm_model, system_prompt=settings.llm_system_prompt)
+    runtime.recipe_policy = probe.recipe_policy
+    monkeypatch.setattr(runtime, "list_models", lambda: [])
+    PerformancePolicy(settings, hardware).configure_llm(runtime)
+    assert local_signature(probe) == local_signature(runtime)
+    assert runtime.num_ctx == 2048 and runtime.num_thread == 3
+    assert runtime.max_tokens == 128 and runtime.timeout_s == 180 and runtime.keep_alive == "0"
+    assert runtime.clone().quality_profile == "economic"
+
+
 MODELS = [{"name": "qwen2.5:3b", "size": 2 * GIB, "details": {"quantization_level": "Q4_K_M"}},
           {"name": "qwen2.5:7b", "size": 4.5 * GIB, "details": {"quantization_level": "Q4_K_M"}}, {"name": "giant:70b", "size": 40 * GIB}]
 

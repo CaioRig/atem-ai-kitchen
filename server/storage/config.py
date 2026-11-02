@@ -59,6 +59,7 @@ class Settings:
     llm_model: str = "qwen2.5:7b"
     llm_auto_model: bool = False  # existing TOML model choices remain manual
     llm_num_ctx: int = 0
+    llm_runtime_threads: int = 0  # runtime-only: exact options validated by bootstrap
     llm_top_p: float | None = None
     llm_repeat_penalty: float | None = None
     llm_quality_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data/model-quality.json")

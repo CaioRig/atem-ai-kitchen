@@ -8,6 +8,9 @@ from tests.test_conversation import FakeLLM, settle
 def anyio_backend(): return "asyncio"
 
 def test_explicit_query_only():
+    assert video_query("Quero ouvir música.") == "música"
+    assert video_query("Toque música brasileira") == "música brasileira"
+    assert video_query("não toque música") is None
     assert video_query("Luna, pesquise um vídeo de receita de lasanha.") == "receita de lasanha"
     assert video_query("Luna, mostre um vídeo de como fazer pão") == "como fazer pão"
     assert video_query("Luna, procure vídeos de receitas de lasanha no YouTube.") == "receitas de lasanha"

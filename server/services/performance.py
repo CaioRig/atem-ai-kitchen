@@ -45,8 +45,8 @@ def hardware_key(h: Hardware) -> dict:
     return {k: v for k, v in asdict(h).items() if k not in ("ram_available", "vram_available", "disk_free", "inference_gpu_used", "ollama_vram", "ollama_ram", "detection_limits")}
 
 
-def _run(args: list[str]) -> str:
-    return subprocess.check_output(args, timeout=3, text=True, stderr=subprocess.DEVNULL,
+def _run(args: list[str], timeout: float = 3) -> str:
+    return subprocess.check_output(args, timeout=timeout, text=True, stderr=subprocess.DEVNULL,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).strip()
 
 
@@ -130,13 +130,14 @@ def detect_hardware() -> Hardware:
         try:
             if os.name == "nt":
                 names = json.loads(_run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                    "@(Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress"]))
+                    "@(Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress"], timeout=15))
                 h.gpu = "; ".join(names if isinstance(names, list) else [names]) or None
             else:
                 names = []
                 for card in Path("/sys/class/drm").glob("card[0-9]*"):
                     if (card / "device/vendor").is_file():
-                        names.append((card / "device/vendor").read_text().strip())
+                        vendor = (card / "device/vendor").read_text().strip()
+                        names.append({"0x1002": "AMD", "0x8086": "Intel", "0x10de": "NVIDIA"}.get(vendor, vendor))
                 h.gpu = "; ".join(names) or None
         except (OSError, ValueError, TypeError, subprocess.SubprocessError):
             pass
@@ -215,8 +216,10 @@ class PerformancePolicy:
         self.profile = self.preferences["profile"]
         if self.profile == "automatic":
             self.profile = initial_profile(self.hardware)
-        self.context = settings.llm_num_ctx or {"economic": 4096, "balanced": 8192, "performance": 16384}[self.profile]
+        self.context = settings.llm_num_ctx or {"economic": 2048, "balanced": 8192, "performance": 16384}[self.profile]
         self.threads = max(1, min(self.hardware.available_threads - 1, {"economic": 4, "balanced": 8, "performance": 12}[self.profile]))
+        if settings.llm_runtime_threads:
+            self.threads = settings.llm_runtime_threads
         if not settings.stt_threads:
             settings.stt_threads = self.threads
         if self.preferences["voice"]:
@@ -236,7 +239,7 @@ class PerformancePolicy:
                 and selected.get("url") == settings.llm_url
                 and selected.get("model") == settings.llm_model
                 and selected.get("configured_context", 0) == settings.llm_num_ctx
-                and selected.get("context") in (4096, 8192, 16384)):
+                and selected.get("context") in (2048, 4096, 8192, 16384)):
             self.context = min(self.context, selected["context"])
 
     @staticmethod
@@ -287,13 +290,13 @@ class PerformancePolicy:
             if self.local and selected.get("size", 0) > max(
                     max(0, (self.hardware.ram_available or 0) - 2 * GIB) * 0.65,
                     max(0, (self.hardware.vram or 0) - 2 * GIB) * 0.8):
-                self.notices.append("Nenhum modelo instalado cabe na estimativa conservadora de memória. Considere instalar qwen2.5:3b no servidor (ollama pull qwen2.5:3b).")
+                self.notices.append("Memória livre limitada: o start.bat verifica candidatos ultraleves e a reserva dos serviços antes de habilitar a IA.")
             if self.local:
                 client.num_ctx = self.context
                 client.num_thread = self.threads
                 client.backend_identity = hardware_key(self.hardware)
                 if self.profile == "economic":
-                    client.keep_alive = "2m"
+                    client.configure_economic()
         except (OSError, ValueError, RuntimeError) as exc:
             self.notices.append(f"Otimização do Ollama indisponível: {type(exc).__name__}; configuração preservada.")
 

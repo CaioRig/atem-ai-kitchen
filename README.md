@@ -63,7 +63,30 @@ identificação/tag e aliases instruct, família, versão/digest conhecido, par�
 quantização, download, estimativas mínimas/recomendadas de RAM/VRAM, contexto,
 CPU/GPU, português, ranks relativos, fontes, data e licença. As estimativas incluem
 contexto/cache e reserva para SO/voz/transcrição; não são garantias oficiais.
-Qwen 3B está catalogado, mas excluído da seleção automática por sua licença de pesquisa.
+Qwen2.5 3B está catalogado, mas excluído da seleção automática por sua licença de pesquisa.
+Em CPU com até quatro threads ou perfil econômico, a seleção automática prioriza
+modelos pequenos de todas as famílias, mantendo Qwen2.5 como prioridade inicial
+heurística e alternativas conforme orçamento. O limite
+considera latência estimada; o nome do processador e a ausência de CUDA não vetam CPU.
+Os metadados dos pequenos foram conferidos nas páginas oficiais
+[0,5B](https://ollama.com/library/qwen2.5:0.5b) e
+[1,5B](https://ollama.com/library/qwen2.5:1.5b).
+No perfil econômico com Whisper base e Kokoro int8, o orçamento inicial estimado
+é de 2,5 GiB livres para 1,5B ou 1,75 GiB para 0,5B, incluindo serviços e margem
+do sistema. RAM já ocupada pelo SO não é descontada duas vezes. Modelos de voz
+manuais e contexto maior ajustam o orçamento; esses valores não são requisitos oficiais.
+Se nem o menor couber, os logs mostram a RAM livre e a IA permanece desativada.
+O perfil econômico usa contexto de 2.048 tokens (salvo preferência explícita),
+até 128 tokens por resposta comum e timeout de geração de pelo menos 180 s.
+O Ollama descarrega o modelo após a resposta para liberar RAM antes da síntese
+de voz; isso pode aumentar a latência. A suíte econômica v6 valida os mesmos
+cenários básicos de conversa do perfil padrão, mais 2 + 2 e instrução sim;
+música, clima e parada
+são verificados pelos reconhecedores reais de comandos, sem inventar dados.
+O pedido de música abre a pesquisa de vídeos existente: a seleção/reprodução
+no YouTube depende da interação do usuário e de internet. Pausar/continuar usa
+o player integrado quando disponível, sem depender do LLM.
+Mudanças de perfil ou da suíte exigem nova aprovação; depois ela pode ser reutilizada offline.
 Metadados consultados nas [páginas oficiais Ollama](https://ollama.com/library/qwen2.5)
 e no [repositório Qwen](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct).
 
@@ -75,9 +98,10 @@ API `/api/pull`, exibindo progresso. Interrompeu? Execute novamente para retomar
 Instalação é confirmada por `/api/tags` e `/api/show`; aliases conhecidos evitam
 downloads redundantes. Nunca são apagados modelos do usuário.
 
-Cada novo candidato passa pelos oito testes reais da aplicação (saudação, 42,
-Brasília, instrução azul, ovos mexidos, contexto em duas mensagens, desconhecimento
-de senha e português). Template, digest, versão do Ollama, hardware e parâmetros
+Cada novo candidato passa pela suíte pt-BR v6: os dez cenários de conversa/comandos
+solicitados, mais capital e descrição de geladeira; o perfil econômico acrescenta
+2+2, apenas sim e intenção de música. Comandos testam os reconhecedores reais sem
+executar ações. Template, digest, versão do Ollama, hardware e parâmetros
 fazem parte da identidade da aprovação. Reprovação permite até três candidatos
 compatíveis no modo automático; o último aprovado e as preferências permanecem.
 HTTP 200 sozinho não aprova nada. Consulte `data/model-quality.json` e
@@ -138,3 +162,11 @@ exige HTTPS para liberar o microfone. Aceite o aviso na primeira visita (ver `do
 cd client; npm test
 ```
 # atem-ai-kitchen
+
+Catálogo ampliado com Qwen3, Granite 4, Llama 3.2 e Gemma 3, preservando Qwen2.5.
+Fontes, benchmarks, estimativas e limitações estão em
+[`docs/model-catalog-research.md`](docs/model-catalog-research.md).
+Para comparar candidatos já instalados, sem baixar nem substituir a escolha ativa:
+`python scripts/benchmark_catalog.py` (use o Python do `.venv`). O cache evita
+repetir inferência; `--force` refaz a comparação. Nenhum candidato é aprovado
+somente por gerar texto ou por pontuação publicada de outra quantização.

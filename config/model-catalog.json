@@ -1,15 +1,23 @@
 {
   "schema_version": 1,
-  "revision": "2026-11-02.2",
+  "metadata_provenance": "source/upstream identificam metadados oficiais. download_bytes é tamanho arredondado da página, reconfirmado pelo manifesto antes do pull. Todos os campos memory/vram/context/rank são estimativas/políticas Luna, não requisitos oficiais. local_validation descreve o catálogo; aprovação real está no registro local. Benchmark de outra precisão/backend não valida o GGUF instalado.",
+  "revision": "2026-11-02.4",
+  "local_results": {
+    "date": "2026-11-02", "hardware": "AMD A12-9720P, Windows, perfil econômico",
+    "source": "docs/model-catalog-local-results.json", "selected_model": null,
+    "models": {"qwen2.5:1.5b": "reprovado: 3/15", "gemma3:1b": "reprovado: 9/15", "qwen2.5:0.5b": "erro do servidor; qualidade não avaliada"},
+    "scope": "Resultados específicos desta máquina/opções; não são avaliações universais. Demais candidatos não avaliados. Status ativo e cache ficam no registro de execução."
+  },
   "memory_estimates": "Estimativas conservadoras da Luna, não requisitos oficiais nem garantia de compatibilidade. Incluem pesos, KV/cache no contexto indicado, runtime e reserva para SO/ASR/TTS. GPU exige RAM livre para serviços; memória compartilhada não conta como VRAM dedicada.",
-  "ranking": "Qualidade e desempenho relativos estimados dentro desta família, sem benchmark local; qualidade tem prioridade. Não reduzir modelo somente por tokens/s.",
+  "ranking": "Prioridade inicial heurística, não pontuação comparável entre benchmarks. Evidência pt documentada e instruct são pré-requisitos; aprovação local é obrigatória. Novas famílias têm prioridade provisória até medição local. Desempenho estimado apenas desempata; threads não vetam compatibilidade.",
   "node_version": "22.22.0",
   "models": [
     {
       "name": "qwen2.5:1.5b", "aliases": ["qwen2.5:1.5b-instruct-q4_K_M"],
       "display_name": "Qwen2.5 1.5B Instruct", "family": "qwen2", "version": "2.5",
       "digest_prefix": "65ec06548149", "parameters_billion": 1.54, "quantization": "Q4_K_M",
-      "download_bytes": 1100000000, "min_memory_gib": 3, "recommended_memory_gib": 5,
+      "download_bytes": 986000000, "min_memory_gib": 2.5, "recommended_memory_gib": 4,
+      "inference_memory_gib": 1.5,
       "min_vram_gib": 2.5, "recommended_vram_gib": 4, "gpu_system_memory_gib": 2,
       "cpu_supported": true, "gpu_supported": true, "min_threads": 2, "context": 4096,
       "chat": true, "language": "multilingual-pt", "portuguese": true,
@@ -24,6 +32,7 @@
       "display_name": "Qwen2.5 3B Instruct", "family": "qwen2", "version": "2.5",
       "digest_prefix": "357c53fb659c", "parameters_billion": 3.09, "quantization": "Q4_K_M",
       "download_bytes": 2100000000, "min_memory_gib": 5, "recommended_memory_gib": 7,
+      "inference_memory_gib": 4,
       "min_vram_gib": 3.5, "recommended_vram_gib": 5, "gpu_system_memory_gib": 2,
       "cpu_supported": true, "gpu_supported": true, "min_threads": 4, "context": 4096,
       "chat": true, "language": "multilingual-pt", "portuguese": true,
@@ -38,6 +47,7 @@
       "display_name": "Qwen2.5 7B Instruct", "family": "qwen2", "version": "2.5",
       "digest_prefix": "845dbda0ea48", "parameters_billion": 7.62, "quantization": "Q4_K_M",
       "download_bytes": 4800000000, "min_memory_gib": 9, "recommended_memory_gib": 12,
+      "inference_memory_gib": 8,
       "min_vram_gib": 6.5, "recommended_vram_gib": 8, "gpu_system_memory_gib": 2,
       "cpu_supported": true, "gpu_supported": true, "min_threads": 6, "context": 8192,
       "chat": true, "language": "multilingual-pt", "portuguese": true,
@@ -52,6 +62,7 @@
       "display_name": "Qwen2.5 14B Instruct", "family": "qwen2", "version": "2.5",
       "digest_prefix": "7cdf5a0187d5", "parameters_billion": 14.8, "quantization": "Q4_K_M",
       "download_bytes": 9500000000, "min_memory_gib": 18, "recommended_memory_gib": 24,
+      "inference_memory_gib": 17,
       "min_vram_gib": 13, "recommended_vram_gib": 16, "gpu_system_memory_gib": 2,
       "cpu_supported": true, "gpu_supported": true, "min_threads": 8, "context": 16384,
       "chat": true, "language": "multilingual-pt", "portuguese": true,
@@ -60,6 +71,130 @@
       "upstream": "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct",
       "verified_at": "2026-11-02", "license": "Apache-2.0",
       "restrictions": "Preservar licença e avisos em redistribuições."
+    },
+    {
+      "name": "qwen2.5:0.5b", "aliases": ["qwen2.5:0.5b-instruct-q4_K_M"],
+      "display_name": "Qwen2.5 0.5B Instruct", "family": "qwen2", "version": "2.5",
+      "digest_prefix": "a8b0c5157701", "parameters_billion": 0.494, "quantization": "Q4_K_M",
+      "download_bytes": 398000000, "min_memory_gib": 1.75, "recommended_memory_gib": 3,
+      "inference_memory_gib": 0.75,
+      "min_vram_gib": 1, "recommended_vram_gib": 2, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true,
+      "quality_rank": 0.5, "performance_rank": 5, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen2.5:0.5b",
+      "upstream": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct",
+      "verified_at": "2026-11-02", "license": "Apache-2.0",
+      "restrictions": "Preservar licença e avisos em redistribuições. Qualidade em pt-BR exige validação local."
+    },
+    {
+      "name": "qwen3:0.6b", "aliases": [], "display_name": "Qwen3 0.6B pós-treinado",
+      "family": "qwen3", "version": "3", "parameters_billion": 0.752, "quantization": "Q4_K_M",
+      "download_bytes": 523000000, "min_memory_gib": 2, "recommended_memory_gib": 3,
+      "inference_memory_gib": 1, "min_vram_gib": 1, "recommended_vram_gib": 2, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 0.5, "performance_rank": 4, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen3:0.6b", "upstream": "https://huggingface.co/Qwen/Qwen3-0.6B",
+      "verified_at": "2026-11-02", "license": "Apache-2.0", "restrictions": "Preservar licença e avisos.",
+      "local_validation": "não avaliado", "benchmark_status": "não avaliado no Ollama local", "benchmarks": [
+        {"name": "throughput", "score": 414.17, "unit": "tokens/s (entrada+saída)", "methodology": "SGLang 0.4.6.post1, batch 1, entrada 1 token, saída 2048", "model": "Qwen3-0.6B", "quantization": "BF16", "hardware": "1 NVIDIA H20 96GB", "source": "https://qwen.readthedocs.io/en/v3.0/getting_started/speed_benchmark.html", "consulted_at": "2026-11-02", "scope": "GPU; não CPU/Ollama/pt-BR"},
+        {"name": "throughput independente", "score": 139, "unit": "tokens/s geração quente", "methodology": "llmb/llama.cpp, Generic Assistant, até 256 tokens, contexto 1024; versão llama.cpp ausente em capturas antigas", "model": "Qwen3-0.6B bartowski GGUF", "quantization": "Q4_K_M", "hardware": "Windows, Intel Ultra 9 285K, CPU sem offload", "source": "https://github.com/folkol/llm-inference-benchmark", "consulted_at": "2026-11-02", "scope": "não representa AMD A12, Ollama nem qualidade pt-BR"}
+      ],
+      "evidence": "Pós-treinado; 119 idiomas no relatório Qwen3, incluindo português. Sem garantia pt-BR. Thinking desativado pela Luna."
+    },
+    {
+      "name": "qwen3:1.7b", "aliases": [], "display_name": "Qwen3 1.7B pós-treinado",
+      "family": "qwen3", "version": "3", "parameters_billion": 2.03, "quantization": "Q4_K_M",
+      "download_bytes": 1400000000, "min_memory_gib": 3.5, "recommended_memory_gib": 5,
+      "inference_memory_gib": 2.5, "min_vram_gib": 2.5, "recommended_vram_gib": 4, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 1, "performance_rank": 2, "automatic_allowed": true,
+      "source": "https://ollama.com/library/qwen3:1.7b", "upstream": "https://huggingface.co/Qwen/Qwen3-1.7B",
+      "verified_at": "2026-11-02", "license": "Apache-2.0", "restrictions": "Preservar licença e avisos.",
+      "local_validation": "não avaliado", "benchmark_status": "não avaliado no Ollama local", "benchmarks": [
+        {"name": "throughput", "score": 227.8, "unit": "tokens/s (entrada+saída)", "methodology": "SGLang 0.4.6.post1, batch 1, entrada 1 token, saída 2048", "model": "Qwen3-1.7B", "quantization": "BF16", "hardware": "1 NVIDIA H20 96GB", "source": "https://qwen.readthedocs.io/en/v3.0/getting_started/speed_benchmark.html", "consulted_at": "2026-11-02", "scope": "GPU; não CPU/Ollama/pt-BR"}
+      ],
+      "evidence": "Português documentado na família Qwen3; validar variante local, sem transferir resultados de modelos maiores."
+    },
+    {
+      "name": "granite4:350m", "aliases": [], "display_name": "Granite 4.0 350M Instruct denso",
+      "family": "granite4", "version": "4.0", "parameters_billion": 0.352, "quantization": "BF16",
+      "download_bytes": 708000000, "min_memory_gib": 2, "recommended_memory_gib": 3,
+      "inference_memory_gib": 1, "min_vram_gib": 1.25, "recommended_vram_gib": 2, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 0.5, "performance_rank": 3, "automatic_allowed": true,
+      "source": "https://ollama.com/library/granite4:350m", "upstream": "https://huggingface.co/ibm-granite/granite-4.0-350m",
+      "verified_at": "2026-11-02", "license": "Apache-2.0", "restrictions": "Preservar licença e avisos.",
+      "local_validation": "não avaliado", "evidence": "IBM documenta português e ajuste de instruções; tag densa, não variante híbrida -h.",
+      "benchmarks": [{"name": "IFEval", "score": 61.63, "methodology": "Instruct Strict", "model": "Granite 4.0 350M Dense", "quantization": "não informada na tabela", "hardware": null, "source": "https://huggingface.co/ibm-granite/granite-4.0-350m", "consulted_at": "2026-11-02", "scope": "instruções; não pt-BR nem medição CPU Ollama"}]
+    },
+    {
+      "name": "granite4:1b", "aliases": [], "display_name": "Granite 4.0 1B Instruct denso",
+      "family": "granite4", "version": "4.0", "parameters_billion": 1.63, "quantization": "BF16",
+      "download_bytes": 3300000000, "min_memory_gib": 5.5, "recommended_memory_gib": 7,
+      "inference_memory_gib": 4.5, "min_vram_gib": 4, "recommended_vram_gib": 6, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 1, "performance_rank": 1, "automatic_allowed": true,
+      "source": "https://ollama.com/library/granite4:1b", "upstream": "https://huggingface.co/ibm-granite/granite-4.0-1b",
+      "verified_at": "2026-11-02", "license": "Apache-2.0", "restrictions": "Preservar licença e avisos.",
+      "local_validation": "não avaliado", "evidence": "Português documentado; BF16 de 3,3 GB não é candidato ultraleve apesar do nome 1B.",
+      "benchmarks": [{"name": "IFEval", "score": 80.82, "methodology": "Instruct Strict", "model": "Granite 4.0 1B Dense", "quantization": "não informada na tabela", "hardware": null, "source": "https://huggingface.co/ibm-granite/granite-4.0-1b", "consulted_at": "2026-11-02", "scope": "instruções; não pt-BR nem medição CPU Ollama"}]
+    },
+    {
+      "name": "llama3.2:1b", "aliases": [], "display_name": "Llama 3.2 1B Instruct",
+      "family": "llama3.2", "version": "3.2", "parameters_billion": 1.24, "quantization": "Q8_0",
+      "download_bytes": 1300000000, "min_memory_gib": 3, "recommended_memory_gib": 4,
+      "inference_memory_gib": 2, "min_vram_gib": 2, "recommended_vram_gib": 3, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 1, "performance_rank": 3, "automatic_allowed": true,
+      "source": "https://ollama.com/library/llama3.2:1b", "upstream": "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct",
+      "verified_at": "2026-11-02", "license": "Llama-3.2-Community", "restrictions": "Uso local sujeito à Community License e Acceptable Use Policy; redistribuição exige avisos/atribuição; organizações acima de 700 milhões de usuários ativos mensais exigem licença específica.",
+      "local_validation": "não avaliado", "evidence": "Português explicitamente suportado; benchmark publicado não é da quantização Ollama.",
+      "benchmarks": [{"name": "MMLU Portuguese", "score": 39.8, "methodology": "5-shot macro_avg/acc; biblioteca interna Meta", "model": "Llama 3.2 1B Instruct", "quantization": "BF16", "hardware": null, "source": "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct", "consulted_at": "2026-11-02", "scope": "português; não conversação pt-BR"}]
+    },
+    {
+      "name": "llama3.2:3b", "aliases": [], "display_name": "Llama 3.2 3B Instruct",
+      "family": "llama3.2", "version": "3.2", "parameters_billion": 3.21, "quantization": "Q4_K_M",
+      "download_bytes": 2000000000, "min_memory_gib": 4.5, "recommended_memory_gib": 6,
+      "inference_memory_gib": 3.5, "min_vram_gib": 3, "recommended_vram_gib": 4, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": true,
+      "quality_rank": 1, "performance_rank": 2, "automatic_allowed": true,
+      "source": "https://ollama.com/library/llama3.2:3b", "upstream": "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct",
+      "verified_at": "2026-11-02", "license": "Llama-3.2-Community", "restrictions": "Community License e Acceptable Use Policy; atribuição na redistribuição e licença específica acima de 700 milhões de usuários ativos mensais.",
+      "local_validation": "não avaliado", "evidence": "Português explicitamente suportado; exigir testes de conversa e comandos locais.",
+      "benchmarks": [{"name": "MMLU Portuguese", "score": 54.5, "methodology": "5-shot macro_avg/acc; biblioteca interna Meta", "model": "Llama 3.2 3B Instruct", "quantization": "BF16", "hardware": null, "source": "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct", "consulted_at": "2026-11-02", "scope": "português; não conversação pt-BR"}]
+    },
+    {
+      "name": "gemma3:270m", "aliases": [], "display_name": "Gemma 3 270M IT experimental",
+      "family": "gemma3", "version": "3", "parameters_billion": 0.268, "quantization": "Q8_0",
+      "download_bytes": 292000000, "min_memory_gib": 1.5, "recommended_memory_gib": 2.5,
+      "inference_memory_gib": 0.5, "min_vram_gib": 0.75, "recommended_vram_gib": 1.5, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-unverified-pt", "portuguese": true, "tool_calling": false,
+      "quality_rank": 0.25, "performance_rank": 5, "automatic_allowed": true,
+      "source": "https://ollama.com/library/gemma3:270m", "upstream": "https://huggingface.co/google/gemma-3-270m-it",
+      "verified_at": "2026-11-02", "license": "Gemma", "restrictions": "Gemma Terms of Use e Prohibited Use Policy; preservar avisos em redistribuição.",
+      "local_validation": "não avaliado", "benchmark_status": "não avaliado; tabela da família não fornece coluna 270M", "benchmarks": [],
+      "evidence": "Família multilíngue; evidência específica pt-BR insuficiente. Candidato experimental de último recurso, nunca aprovado sem suíte local."
+    },
+    {
+      "name": "gemma3:1b", "aliases": [], "display_name": "Gemma 3 1B IT",
+      "family": "gemma3", "version": "3", "parameters_billion": 1, "quantization": "Q4_K_M",
+      "download_bytes": 806000000, "min_memory_gib": 2.25, "recommended_memory_gib": 3.5,
+      "inference_memory_gib": 1.25, "min_vram_gib": 1.5, "recommended_vram_gib": 2.5, "gpu_system_memory_gib": 1,
+      "cpu_supported": true, "gpu_supported": true, "min_threads": 1, "context": 2048,
+      "chat": true, "language": "multilingual-pt", "portuguese": true, "tool_calling": false,
+      "quality_rank": 0.75, "performance_rank": 4, "automatic_allowed": true,
+      "source": "https://ollama.com/library/gemma3:1b", "upstream": "https://huggingface.co/google/gemma-3-1b-it",
+      "verified_at": "2026-11-02", "license": "Gemma", "restrictions": "Gemma Terms of Use e Prohibited Use Policy; preservar avisos em redistribuição.",
+      "local_validation": "não avaliado", "benchmark_status": "não avaliado na quantização Ollama", "benchmarks": [],
+      "evidence": "IT e treinamento multilíngue documentados; não equivalem a garantia de conversação pt-BR."
     }
   ]
 }

@@ -119,6 +119,13 @@ def test_custom_system_prompt_is_used(ollama):
     assert ollama.requests[0]["messages"][0]["content"] == "Responda só com sim ou não."
 
 
+@pytest.mark.parametrize("name,thinking", [("qwen3:0.6b", False), ("gemma3:1b", None)])
+def test_thinking_is_disabled_only_for_qwen3(ollama, name, thinking):
+    ollama.models.append(name)
+    assert client(ollama, model=name).reply("Bom dia!")
+    assert ollama.requests[-1].get("think") is thinking
+
+
 def test_short_history_keeps_whole_turns_and_can_be_cleared(ollama):
     c = client(ollama)
     c.num_ctx = 4096
@@ -169,7 +176,7 @@ def test_empty_reply_and_server_errors(ollama):
     ollama.error = "cuda out of memory"
     with pytest.raises(LLMError) as exc:
         client(ollama).reply("oi")
-    assert exc.value.code == "server" and "out of memory" in exc.value.detail
+    assert exc.value.code == "memory_insufficient" and "out of memory" in exc.value.detail
     ollama.error = None
     ollama.status = 500
     with pytest.raises(LLMError) as exc:
@@ -213,6 +220,18 @@ def test_timeout_is_reported(ollama):
 def test_clean_reply_strips_thinking_and_blank_lines():
     assert clean_reply("<think>hmm\n</think>\n\nOi!\n\n\n\nTudo  bem? \n") == "Oi!\n\nTudo bem?"
     assert clean_reply("   ") == ""
+
+
+@pytest.mark.parametrize("status,body,code", [
+    (500, b"model requires more system memory (2 GiB) than is available", "memory_insufficient"),
+    (500, b"out of memory", "memory_insufficient"),
+    (400, b"invalid option", "configuration"),
+    (404, b"model not found", "model_missing"),
+    (500, b"runner failed", "server"),
+])
+def test_ollama_errors_distinguish_memory_configuration_and_missing(status, body, code):
+    c = OllamaClient("http://localhost:11434", "qwen2.5:0.5b")
+    assert c._http_error(status, body).code == code
 
 
 def test_local_url_validation():

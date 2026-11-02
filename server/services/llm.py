@@ -147,10 +147,17 @@ class OllamaClient:
         self.recovery_notice = ""
         self.backend_identity = {}
         self.recipe_policy = None
+        self.quality_profile = "standard"
+
+    def configure_economic(self) -> None:
+        self.quality_profile = "economic"
+        self.max_tokens = min(self.max_tokens, 128)
+        self.timeout_s = max(self.timeout_s, 180)
+        self.keep_alive = "0"  # release LLM memory before speech synthesis
 
     def options(self, max_tokens: int | None = None) -> dict:
         options = {"temperature": self.temperature, "num_predict": max_tokens or self.max_tokens}
-        qwen = bool(re.match(r"^qwen2\.5:(?:7b|14b|1\.5b)(?:-|$)", self.name))
+        qwen = bool(re.match(r"^qwen2\.5:(?:7b|14b|1\.5b|0\.5b)(?:-|$)", self.name))
         top_p = self.top_p if self.top_p is not None else .8 if qwen else None
         penalty = self.repeat_penalty if self.repeat_penalty is not None else (1.1 if ":1.5b" in self.name else 1.05) if qwen else None
         if top_p is not None:
@@ -170,6 +177,7 @@ class OllamaClient:
         other.num_ctx, other.num_thread = self.num_ctx, self.num_thread
         other.backend_identity = self.backend_identity
         other.recipe_policy = self.recipe_policy
+        other.quality_profile = self.quality_profile
         return other
 
     def clear_history(self) -> None:
@@ -315,6 +323,8 @@ class OllamaClient:
                 {"role": "system", "content": system},
             ],
         }
+        if self.name.split(":", 1)[0] == "qwen3":
+            payload["think"] = False  # interactive voice responses have a small output budget
         if time.monotonic() - self._history_at > 1800:
             self._history = []
         history_budget = max(0, min(8000, (self.num_ctx or 4096) * 2 - len(system) - len(text)))
@@ -365,7 +375,7 @@ class OllamaClient:
                 except ValueError as exc:
                     raise LLMError("bad_response", "Resposta inesperada do Ollama.", line[:200].decode("utf-8", "replace")) from exc
                 if obj.get("error"):
-                    raise LLMError("server", "O Ollama devolveu um erro ao gerar a resposta.", str(obj["error"])[:300])
+                    raise self._http_error(500, str(obj["error"]).encode())
                 piece = (obj.get("message") or {}).get("content") or ""
                 if piece:
                     if not isinstance(piece, str):
@@ -406,6 +416,10 @@ class OllamaClient:
 
     def _http_error(self, status: int, body: bytes) -> LLMError:
         detail = body[:300].decode("utf-8", "replace")
+        if re.search(r"out of memory|not enough (?:system )?memory|requires more (?:system )?memory|insufficient memory|cannot allocate|failed to allocate", detail, re.I):
+            return LLMError("memory_insufficient", "Memória insuficiente para executar o modelo.", detail)
+        if status == 400:
+            return LLMError("configuration", "O Ollama recusou a configuração do modelo.", detail)
         if status == 404:
             return LLMError("model_missing", self._missing_model_msg(), detail)
         return LLMError("server", f"O Ollama respondeu com erro ({status}). Tente de novo.", detail)

@@ -40,3 +40,17 @@ async def test_stop_has_priority_over_busy_response():
     assert conv.busy
     await conv.ask("pare de falar")
     assert not conv.busy and events[-1]["action"] == "stop"
+
+
+@pytest.mark.anyio
+async def test_music_commands_work_without_llm():
+    from server.services.videos import VideoSearch
+    from tests.test_conversation import settle
+    events = []
+    async def send(event): events.append(event)
+    conv = Conversation(StateMachine(AssistantState.IDLE), None, on_screen=send, videos=VideoSearch())
+    assert await conv.ask("Quero ouvir música.")
+    await settle(conv)
+    assert events[-1]["type"] == "videos" and events[-1]["query"] == "música"
+    assert await conv.ask("Pare a música.")
+    assert events[-1] == {"type": "screen", "action": "pause_video"}

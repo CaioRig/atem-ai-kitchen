@@ -80,6 +80,10 @@ def load_catalog(root: Path) -> dict:
             for key in ("cpu_supported", "gpu_supported", "chat", "portuguese", "automatic_allowed"):
                 if type(entry[key]) is not bool:
                     raise ValueError()
+            if "inference_memory_gib" in entry:
+                estimate = entry["inference_memory_gib"]
+                if type(estimate) not in (int, float) or not math.isfinite(estimate) or not 0 < estimate <= entry["min_memory_gib"]:
+                    raise ValueError()
             for key in ("source", "upstream"):
                 if not isinstance(entry[key], str):
                     raise ValueError()
@@ -421,7 +425,20 @@ def suitable(entry: dict, h: Hardware, provisional: bool = False) -> bool:
               and (h.inference_gpu_used or provisional) and h.vram_available is not None
               and gpu_memory >= entry["min_vram_gib"] * GIB
               and (h.ram_available or 0) >= entry["gpu_system_memory_gib"] * GIB)
-    return h.available_threads >= entry["min_threads"] and (ram_ok or gpu_ok)
+    # Thread count affects latency, not whether a quantized model can run on CPU.
+    return h.available_threads >= 1 and (ram_ok or gpu_ok)
+
+
+def memory_reserve(settings) -> dict:
+    """Additional resident services; OS memory already used is excluded by MemAvailable.
+
+    These are estimates, not official requirements. Leave headroom for OS growth,
+    activation/VAD/server, Whisper buffers and the configured voice runtime.
+    """
+    return {"system_headroom_gib": 0.25, "server_vad_gib": 0.1,
+            "asr_gib": 0.35 if "base" in settings.stt_model.name else 0.65,
+            "tts_gib": (0 if not settings.tts_enabled else 0.15 if settings.tts_engine == "piper"
+                        else 0.3 if "int8" in settings.tts_model.name else 0.6)}
 
 
 def performance_profile(settings, hardware: Hardware) -> str:
@@ -430,15 +447,19 @@ def performance_profile(settings, hardware: Hardware) -> str:
     return requested if requested in ("economic", "balanced", "performance") else initial_profile(hardware)
 
 
-def select_recommendation(catalog: dict, models: list[dict], h: Hardware) -> tuple[dict, bool]:
+def select_recommendation(catalog: dict, models: list[dict], h: Hardware, profile: str | None = None) -> tuple[dict, bool]:
     options = [m for m in catalog["models"] if m.get("automatic_allowed") and m.get("chat") and m.get("portuguese")
                and suitable(m, h, provisional=h.acceleration_verified)]
+    # Conservative latency policy on small CPUs; never infer throughput from CPU name.
+    if not h.acceleration_verified and (profile == "economic" or h.available_threads <= 4):
+        small = [m for m in options if m["parameters_billion"] <= 1.6]
+        options = small or options  # latency preference, never a CPU incompatibility rule
     if not options:
-        raise BootstrapError("Memória/CPU abaixo da estimativa mínima dos modelos do catálogo. Libere recursos ou configure um servidor Ollama na LAN; nenhum modelo será baixado às cegas.")
+        raise BootstrapError(f"Memória insuficiente ou desconhecida para os candidatos: RAM total={h.ram_total}, disponível={h.ram_available} bytes; estimativas incluem inferência e reserva de SO/ASR/TTS. Nenhum download iniciado.")
     # Reuse a compatible installed model before downloading any alternative.
     installed = [{**m, "name": i["name"]} for m in options for i in models
                  if i.get("name") in (m["name"], *m.get("aliases", []))]
-    return max(installed or options, key=lambda m: m["quality_rank"]), bool(installed)
+    return max(installed or options, key=lambda m: (m.get("fallback_family_priority", False), m["quality_rank"])), bool(installed)
 
 
 def model_manifest(model: str) -> int:
@@ -661,23 +682,41 @@ def configure_models(settings, catalog: dict, hardware: Hardware, previous: dict
         return name, {"selection_origin": "manual" if manual else "remote"}
     if manual:
         name = manual
+        context = settings.llm_num_ctx or 8192
+        entry = next((e for e in catalog["models"] if name in (e["name"], *e.get("aliases", []))), None)
+        if entry is not None:
+            reserve_gib = sum(memory_reserve(settings).values())
+            ratio = max(1, context / entry["context"])
+            budget = {**entry,
+                      "min_memory_gib": entry.get("inference_memory_gib", entry["min_memory_gib"]) * ratio + reserve_gib,
+                      "min_vram_gib": entry["min_vram_gib"] * ratio,
+                      "gpu_system_memory_gib": max(entry["gpu_system_memory_gib"], reserve_gib)}
+            if not suitable(budget, hardware, provisional=hardware.acceleration_verified):
+                raise BootstrapError("Recursos insuficientes para executar o modelo manual no contexto configurado; escolha preservada")
         if not any(m.get("name") in (name, name + ":latest") for m in models):
-            entry = next((e for e in catalog["models"] if name in (e["name"], *e.get("aliases", []))), None)
             if entry is None:
                 raise BootstrapError(f"Modelo manual ausente e tamanho desconhecido. Instale conscientemente com ollama pull {name}; sua escolha foi preservada.")
             if not suitable(entry, hardware, provisional=hardware.acceleration_verified):
                 raise BootstrapError("Recursos insuficientes para baixar e executar o modelo manual; escolha preservada")
             pull_model(settings.llm_url, name, entry["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
-        context = settings.llm_num_ctx or 8192
     else:
-        selection = catalog
+        reserve = memory_reserve(settings)
+        reserve_gib = sum(reserve.values())
+        log.info("RAM total=%.2f GiB; disponível=%.2f GiB; reservas estimadas=%s; GPU=%s; aceleração confirmada=%s",
+                 (hardware.ram_total or 0) / GIB, (hardware.ram_available or 0) / GIB,
+                 reserve, hardware.gpu, hardware.inference_gpu_used)
+        entries = [{**e, "min_memory_gib": e.get("inference_memory_gib", e["min_memory_gib"]) + reserve_gib,
+                    "gpu_system_memory_gib": max(e["gpu_system_memory_gib"], reserve_gib)} for e in catalog["models"]]
+        selection = {**catalog, "models": entries}
+        if profile == "economic" and not settings.llm_num_ctx:
+            selection = {**selection, "models": [{**e, "context": min(e["context"], 2048)} for e in entries]}
         if settings.llm_num_ctx:
-            # Scale the complete estimate conservatively when a user requests more context.
+            # Context grows inference memory; resident voice/system services do not scale.
             entries = []
-            for e in catalog["models"]:
+            for e in selection["models"]:
                 ratio = max(1, settings.llm_num_ctx / e["context"])
                 entries.append({**e, "context": settings.llm_num_ctx,
-                                "min_memory_gib": e["min_memory_gib"] * ratio,
+                                "min_memory_gib": (e["min_memory_gib"] - reserve_gib) * ratio + reserve_gib,
                                 "min_vram_gib": e["min_vram_gib"] * ratio})
             selection = {**catalog, "models": entries}
         if offline:
@@ -686,19 +725,27 @@ def configure_models(settings, catalog: dict, hardware: Hardware, previous: dict
             approved = QualityRegistry(settings.llm_quality_path).read()["last_good"]
             selection = {**selection, "models": [e for e in selection["models"]
                 if any(n in approved for n in (e["name"], *e.get("aliases", [])))]}
-        entry, installed = select_recommendation(selection, models, hardware)
+            if not selection["models"]:
+                raise BootstrapError("Nenhum candidato com aprovação salva para uso offline; valide um modelo antes de iniciar a IA nesse modo. Nenhum download iniciado.")
+        entry, installed = select_recommendation(selection, models, hardware, profile)
         preferred = previous.get("quality", {}).get("model")
         if not preferred:
             from server.services.model_quality import QualityRegistry
             preferred = QualityRegistry(settings.llm_quality_path).read().get("selected", {}).get("model")
         cached_models = [m for m in models if m.get("name") == preferred]
         if cached_models:
-            cached_entry, ready = select_recommendation(selection, cached_models, hardware)
+            cached_entry, ready = select_recommendation(selection, cached_models, hardware, profile)
             if ready:
                 entry, installed = cached_entry, True
         name, context = entry["name"], entry["context"]
+        log.info("Candidato %s; inferência+serviços estimados %.2f GiB; contexto=%d", name, entry["min_memory_gib"], context)
         if not installed:
-            pull_model(settings.llm_url, name, entry["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
+            try:
+                pull_model(settings.llm_url, name, entry["download_bytes"], Path(os.environ.get("OLLAMA_MODELS", str(Path.home() / ".ollama/models"))), offline)
+            except (RuntimeError, ValueError, OSError, http.client.HTTPException) as exc:
+                failure = BootstrapError(str(exc))
+                failure.candidate = name
+                raise failure from exc
     metadata = next((m for m in installed_models(settings.llm_url) if m.get("name") in (name, name + ":latest")), {})
     identity = {"hardware": hardware_key(hardware), "model": name, "url": settings.llm_url, "context": context,
                 "catalog": catalog["revision"], "digest": metadata.get("digest"), "modified_at": metadata.get("modified_at"),
@@ -727,7 +774,8 @@ def validate_model_selection(settings, hardware: Hardware, *, force=False, offli
     registry = QualityRegistry(settings.llm_quality_path)
     report = registry.ensure(client, force=force and not offline, allow_tests=not offline)
     if not report["approved"]:
-        raise BootstrapError("IA indisponível: nenhum modelo passou nos oito testes de qualidade. O último modelo aprovado e as preferências foram preservados. Consulte data/model-quality.json.")
+        reasons = sorted({r.get("reason", "unknown") for r in report.get("tests", []) if not r.get("passed")})
+        raise BootstrapError(f"Modelo {client.name} reprovado: {', '.join(reasons) or report.get('reason', 'qualidade')}. Consulte data/model-quality.json.")
     settings.llm_model = client.name
     return {"model": client.name, "approval_key": client.quality_key, "options": client.options(),
             "identity": report["identity"], "notice": client.recovery_notice}
@@ -742,16 +790,35 @@ def prepare_llm(settings, catalog: dict, hardware: Hardware, previous: dict, off
     try:
         for attempt in range(1 if manual else 3):
             settings.llm_num_ctx = original[1]
-            name, evaluation = configure_models(settings, {**catalog, "models": remaining}, hardware, previous, offline)
+            name = None
             try:
+                name, evaluation = configure_models(settings, {**catalog, "models": remaining}, hardware, previous, offline)
                 quality = validate_model_selection(settings, hardware, force=force, offline=offline)
                 update_acceleration(hardware, settings.llm_url, name)
                 return {**evaluation, "quality": quality}
-            except (RuntimeError, ValueError, OSError, http.client.HTTPException):
-                log.warning("Modelo %s não aprovado (tentativa %d); configuração aprovada anterior preservada", name, attempt + 1)
+            except (RuntimeError, ValueError, OSError, http.client.HTTPException) as exc:
+                name = getattr(exc, "candidate", name)
+                if name is None:
+                    raise  # no selected candidate: preserve resource/connectivity diagnostics
+                log.warning("Modelo %s não aprovado (tentativa %d): %s", name, attempt + 1, exc)
                 if manual:
                     raise BootstrapError("Modelo manual não aprovado; escolha preservada. Consulte o relatório de qualidade.") from None
-                remaining = [e for e in remaining if name not in (e["name"], *e.get("aliases", []))]
+                try:
+                    api(settings.llm_url, "/api/generate", {"model": name, "keep_alive": 0}, timeout=30)
+                except (RuntimeError, ValueError, OSError, http.client.HTTPException):
+                    log.warning("Não foi possível descarregar %s; memória será reavaliada", name)
+                fresh = detect_server()
+                hardware.ram_total, hardware.ram_available = fresh.ram_total, fresh.ram_available
+                update_acceleration(hardware, settings.llm_url)
+                failed = next((e for e in remaining if name in (e["name"], *e.get("aliases", []))), None)
+                remaining = [e for e in remaining if failed and e["name"] != failed["name"]
+                             and e.get("inference_memory_gib", e["min_memory_gib"]) <= failed.get("inference_memory_gib", failed["min_memory_gib"])]
+                other_families = [e for e in remaining if failed and e["family"] != failed["family"]
+                                  and suitable(e, hardware, provisional=hardware.acceleration_verified)]
+                if other_families:
+                    remaining = [{**e, "fallback_family_priority": e in other_families} for e in remaining]
+                if not remaining and attempt < 2:
+                    raise BootstrapError(f"Nenhum candidato de menor consumo viável após falha de {name}: {exc}") from exc
         raise BootstrapError("Nenhum candidato passou na validação após três tentativas; IA indisponível")
     except (RuntimeError, ValueError, OSError, http.client.HTTPException):
         settings.llm_model, settings.llm_num_ctx = original
@@ -783,6 +850,16 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
             state["python_versions"] = dependency_report(python, root)["versions"]
     hardware = detect_server()
     profile = performance_profile(settings, hardware)
+    automatic_path = root / "data/bootstrap-auto.json"
+    prior = read_json(automatic_path)
+    baseline = prior.get("baseline", {}) or {key: str(getattr(base, key)) for key in
+                ("llm_model", "llm_num_ctx", "stt_model", "tts_model")}
+    # Select voice assets before estimating the RAM shared with inference.
+    if settings.bootstrap_managed:
+        if str(base.stt_model) == baseline.get("stt_model"):
+            settings.stt_model = root / ("models/whisper/ggml-base.bin" if profile == "economic" else "models/whisper/ggml-small-q8_0.bin")
+        if settings.tts_engine == "kokoro" and str(base.tts_model) == baseline.get("tts_model"):
+            settings.tts_model = root / ("models/tts/kokoro-v1.0.int8.onnx" if profile == "economic" else "models/tts/kokoro-v1.0.onnx")
     log.info("Hardware: %s; %s threads disponíveis; perfil inicial %s", hardware.cpu or "CPU desconhecida", hardware.available_threads, profile)
     if settings.llm_enabled:
         try:
@@ -793,8 +870,6 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
                 state["ollama_version"] = "unknown"
             if settings.bootstrap_managed:
                 settings.llm_num_ctx = base.llm_num_ctx  # A generated overlay is not an explicit context preference.
-            if settings.bootstrap_managed:
-                settings.llm_num_ctx = base.llm_num_ctx  # A generated overlay is not an explicit context preference.
             evaluation = prepare_llm(settings, catalog, hardware, state, options.offline, force=options.reprobe)
             state.update(evaluation)
             state["llm_status"] = {"available": True}
@@ -803,19 +878,9 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
             log.warning("IA indisponível (%s). Verifique data/model-quality.json, conexão e memória livre. Os demais serviços serão iniciados; modelo/preferências aprovados preservados.", reason)
             state["llm_status"] = {"available": False, "reason": reason}
             settings.llm_enabled = False  # Only this process/run; never change the user's TOML.
-        model = settings.llm_model
+        model = settings.llm_model if settings.llm_enabled else None
     else:
-        model = settings.llm_model
-    # Only settings created/owned by bootstrap get automatic ASR/TTS paths. Individual TOML edits win.
-    automatic_path = root / "data/bootstrap-auto.json"
-    prior = read_json(automatic_path)
-    baseline = prior.get("baseline", {}) or {key: str(getattr(base, key)) for key in
-                ("llm_model", "llm_num_ctx", "stt_model", "tts_model")}
-    if settings.bootstrap_managed:
-        if str(base.stt_model) == baseline.get("stt_model"):
-            settings.stt_model = root / ("models/whisper/ggml-base.bin" if profile == "economic" else "models/whisper/ggml-small-q8_0.bin")
-        if settings.tts_engine == "kokoro" and str(base.tts_model) == baseline.get("tts_model"):
-            settings.tts_model = root / ("models/tts/kokoro-v1.0.int8.onnx" if profile == "economic" else "models/tts/kokoro-v1.0.onnx")
+        model = None
     assets = model_assets(settings, options.offline, state.get("assets"))
     ensure_tls(settings)
     settings.validate()
@@ -859,7 +924,7 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
         if not settings.llm_enabled:
             for key in ("llm_model", "llm_num_ctx"):
                 selected.pop(key, None)
-                if key in prior.get("selected", {}):
+                if not settings.llm_auto_model and key in prior.get("selected", {}):
                     selected[key] = prior["selected"][key]
         write_json(automatic_path, {"schema_version": SCHEMA, "baseline": baseline, "selected": selected})
     state.update(schema_version=SCHEMA, hardware=hardware_key(hardware), hardware_observed=asdict(hardware),
@@ -867,7 +932,8 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
                  profile=profile, assets=assets, python=platform.python_version(),
                  requirements_sha256=sha256(root / "requirements.txt"), disk_free_bytes=shutil.disk_usage(root).free)
     write_json(state_path, state)
-    log.info("Preparação concluída; IA=%s; voz=%s. Configuração e segredos existentes preservados.", model, settings.tts_engine)
+    log.info("Preparação concluída; IA=%s; llm.enabled=%s; voz=%s. Configuração e segredos existentes preservados.",
+             model or "desativada", settings.llm_enabled, settings.tts_engine)
     return {"settings": settings, "state": state}
 
 
@@ -921,8 +987,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         prepared = prepare(ROOT, options, owned)
         if not options.prepare_only:
-            command([str(python), "-m", "server.main",
-                     "--validated-llm" if prepared["settings"].llm_enabled else "--without-llm"])
+            args = [str(python), "-m", "server.main"]
+            if prepared["settings"].llm_enabled:
+                approved = prepared["state"]["quality"]
+                args.extend(["--validated-llm", "--llm-model", approved["model"]])
+                for option, flag in (("num_ctx", "--llm-context"), ("num_thread", "--llm-threads")):
+                    if approved.get("options", {}).get(option):
+                        args.extend([flag, str(approved["options"][option])])
+            else:
+                args.append("--without-llm")
+            command(args)
         return 0
     except KeyboardInterrupt:
         log.info("Interrompido. Execute novamente para retomar as etapas pendentes.")

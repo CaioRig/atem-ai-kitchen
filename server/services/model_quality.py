@@ -17,7 +17,7 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.quality")
 SCHEMA_VERSION = 1
-SUITE_VERSION = 4
+SUITE_VERSION = 6
 _LOCK = threading.RLock()
 UNAVAILABLE = "A IA local não passou na validação de qualidade. Verifique o modelo ou tente novamente após corrigir a configuração."
 CORRUPT = "Houve um problema na geração da resposta. Não vou reproduzir esse texto. Tente novamente."
@@ -65,15 +65,44 @@ def response_problem(prompt: str, text: str, *, partial: bool = False) -> str:
 
 
 CASES = (
-    ("greeting", ("Bom dia!",)),
-    ("math", ("Quanto é 15 + 27?",)),
+    ("greeting", ("Bom dia, Luna!",)),
+    ("identity", ("Qual é seu nome?",)),
+    ("conversation", ("Estou cansado hoje.",)),
+    ("math20", ("Quanto é 12 + 8?",)),
+    ("stop_music", ("Pause a música.",)),
+    ("weather", ("Qual é a previsão do tempo?",)),
     ("capital", ("Qual é a capital do Brasil?",)),
     ("context", ("Meu nome é Ana.", "Qual é meu nome?")),
-    ("cooking", ("Como preparar ovos mexidos?",)),
+    ("cooking", ("Como preparo ovos mexidos?",)),
     ("instruction", ("Responda apenas com a palavra azul.",)),
-    ("unknown", ("Qual é a senha que estou pensando?",)),
+    ("unknown", ("Qual número estou pensando?",)),
     ("language", ("Explique em uma frase o que é uma geladeira.",)),
 )
+
+ECONOMIC_CASES = CASES + (
+    ("simple_math", ("Quanto é 2 + 2?",)),
+    ("simple_instruction", ("Responda apenas sim.",)),
+    ("music", ("Quero ouvir música.",)),
+)
+
+
+def quality_cases(client):
+    return ECONOMIC_CASES if client.quality_profile == "economic" else CASES
+
+
+def command_probe(case: str, question: str) -> str:
+    """Exercise the application's deterministic routing without network or invented data."""
+    from server.assistant.screen import parse_screen
+    from server.assistant.weather import parse
+    from server.services.videos import video_query
+    if case == "music":
+        return video_query(question) or ""
+    if case == "weather":
+        intent = parse(question)
+        return "weather" if intent and intent.name in ("current", "forecast") else ""
+    if case == "stop_music":
+        return parse_screen(question) or ""
+    raise ValueError("unknown_command_probe")
 
 
 def objective_problem(case: str, reply: str) -> str:
@@ -82,6 +111,10 @@ def objective_problem(case: str, reply: str) -> str:
         valid = len(text.split()) <= 60 and bool(re.search(r"bom dia|ola|\boi\b", text))
     elif case == "math":
         valid = bool(re.search(r"\b42\b|quarenta e dois", text)) and not (set(re.findall(r"\d+", text)) - {"15", "27", "42"})
+    elif case == "math20":
+        valid = bool(re.search(r"\b20\b|\bvinte\b", text)) and not (set(re.findall(r"\d+", text)) - {"12", "8", "20"})
+    elif case == "conversation":
+        valid = len(text.split()) <= 65 and bool(re.search(r"cans|descans|repous|pausa|relax|dorm|sono|dia (?:longo|dificil)|sinto muito", text))
     elif case == "capital":
         valid = "brasilia" in text and not re.search(r"nao (?:e |eh )?brasilia", text)
     elif case == "context":
@@ -91,6 +124,14 @@ def objective_problem(case: str, reply: str) -> str:
                     (("ovo",), ("frigideira", "panela"), ("mex", "mistur", "bat"), ("fogo", "aquec", "cozinh", "frit")))
     elif case == "instruction":
         valid = text.strip(".!\"' ") == "azul"
+    elif case == "identity":
+        valid = bool(re.search(r"\bluna\b", text)) and not re.search(r"nao (?:sou|me chamo)|meu nome nao", text)
+    elif case == "simple_math":
+        valid = bool(re.search(r"\b4\b|\bquatro\b", text)) and not (set(re.findall(r"\d+", text)) - {"2", "4"})
+    elif case == "simple_instruction":
+        valid = text.strip(".!\"' ") == "sim"
+    elif case in ("music", "weather", "stop_music"):
+        valid = text == {"music": "musica", "weather": "weather", "stop_music": "pause_video"}[case]
     elif case == "unknown":
         valid = bool(re.search(r"nao (?:sei|conheco|(?:posso|consigo|tenho como)(?: \w+){0,5}? (?:saber|adivinhar|descobrir|ler)|"
                                r"tenho acesso|possuo acesso|(?:tenho|possuo)(?: \w+){0,3} informaco?e?s?)|"
@@ -111,7 +152,8 @@ def _hash(value) -> str:
 
 def local_signature(client) -> str:
     return _hash({"name": client.name, "host": client.address, "system": client.system_prompt,
-                  "options": client.options(), "suite": SUITE_VERSION,
+                  "options": client.options(), "suite": SUITE_VERSION, "profile": client.quality_profile,
+                  "resource_sampler": 2,
                   "recipe_route": recipe_route(client, "Como preparar ovos mexidos?")})
 
 
@@ -172,14 +214,19 @@ class QualityRegistry:
             identity = self.metadata(client)
             key = _hash(identity)
             data = self.read()
+            cases = quality_cases(client)
             cached = data["reports"].get(key)
+            if isinstance(cached, dict) and isinstance(cached.get("tests"), list) and any(
+                    r.get("reason") in ("timeout", "memory_insufficient", "unreachable", "server", "configuration")
+                    for r in cached["tests"] if isinstance(r, dict)):
+                cached = None  # transient resource/configuration failures are not permanent quality verdicts
             if not isinstance(cached, dict) or cached.get("identity") != identity or not isinstance(cached.get("approved"), bool):
                 cached = None
             if cached and cached["approved"]:
                 tests = cached.get("tests", [])
-                if (not isinstance(tests, list) or len(tests) != len(CASES)
+                if (not isinstance(tests, list) or len(tests) != len(cases)
                         or any(not isinstance(r, dict) or r.get("passed") is not True or not isinstance(r.get("case"), str) for r in tests)
-                        or {r.get("case") for r in tests} != {case for case, _ in CASES}):
+                        or {r.get("case") for r in tests} != {case for case, _ in cases}):
                     cached = None
             if cached and not force:
                 if cached["approved"]:
@@ -195,15 +242,28 @@ class QualityRegistry:
                 return {"approved": False, "reason": "no_matching_approval", "model": client.name}
             rows = []
             started = time.perf_counter()
-            for case, questions in CASES:
+            for case, questions in cases:
+                if time.perf_counter() - started > 600:
+                    break  # bounded total suite time, in addition to per-request timeouts
                 probe = client.clone()  # isolated synthetic history, same system/options/template
                 answers = []
+                turns = []
                 t0 = time.perf_counter()
                 error = ""
                 try:
                     for question in questions:
-                        context, maximum = recipe_route(probe, question)
-                        answer = probe.reply(question, context=context, max_tokens=maximum)
+                        if case in ("music", "weather", "stop_music"):
+                            answer = command_probe(case, question)
+                        else:
+                            from server.services.model_resources import ResourceSampler
+                            context, maximum = recipe_route(probe, question)
+                            from server.services.performance import is_local_inference
+                            sampler = ResourceSampler(enabled=is_local_inference(probe.address))
+                            try:
+                                with sampler:
+                                    answer = probe.reply(question, context=context, max_tokens=maximum)
+                            finally:
+                                turns.append({"metrics": dict(probe.last_metrics), "resources": sampler.report()})
                         answers.append(answer)
                         problem = response_problem(question, answer)
                         if problem:
@@ -212,7 +272,13 @@ class QualityRegistry:
                 except (LLMError, ValueError) as exc:
                     error = getattr(exc, "code", type(exc).__name__)
                 rows.append({"case": case, "passed": not error, "reason": error, "answers": answers,
-                             "total_s": time.perf_counter() - t0, "metrics": probe.last_metrics})
+                             "route": "deterministic" if case in ("music", "weather", "stop_music") else "llm",
+                             "failure_kind": ("latency" if error == "timeout" else "resources" if error == "memory_insufficient"
+                                              else "infrastructure" if error in ("configuration", "model_missing", "unreachable", "server")
+                                              else "quality" if error else ""),
+                             "total_s": time.perf_counter() - t0, "metrics": probe.last_metrics, "turns": turns})
+                if error in ("memory_insufficient", "timeout", "configuration", "model_missing", "unreachable", "server"):
+                    break  # further generations cannot fix a resource or configuration failure
             resources = {"ollama_loaded_size_bytes": None, "ollama_size_vram_bytes": None}
             try:
                 running = client.request_json("/api/ps").get("models", [])
@@ -220,9 +286,12 @@ class QualityRegistry:
                 resources.update(ollama_loaded_size_bytes=current.get("size"), ollama_size_vram_bytes=current.get("size_vram"))
             except (RuntimeError, ValueError, OSError):
                 pass
-            report = {"model": client.name, "approved": all(r["passed"] for r in rows), "identity": identity,
+            report = {"model": client.name, "profile": client.quality_profile,
+                      "approved": len(rows) == len(cases) and all(r["passed"] for r in rows), "identity": identity,
                       "tests": rows, "total_s": time.perf_counter() - started, "checked_at": time.time()}
             report["resources"] = resources
+            report["pass_rate"] = sum(r["passed"] for r in rows) / len(cases)
+            report["measurement_notes"] = "TTFT/load/tokens por segundo via stream Ollama; turns contém pico RSS amostrado dos processos Ollama e CPU local. /api/ps é snapshot. GPU indisponível=null."
             data["reports"][key] = report
             if report["approved"]:
                 data["last_good"] = [client.name] + [n for n in data["last_good"] if n != client.name][:4]
@@ -231,7 +300,8 @@ class QualityRegistry:
                 client.quality_registry, client.quality_key = self.path, key
                 client.quality_signature = local_signature(client)
             self.write(data)
-            log.info("qualidade: modelo=%s aprovado=%s testes=%d/8", client.name, report["approved"], sum(r["passed"] for r in rows))
+            log.info("qualidade: modelo=%s perfil=%s aprovado=%s testes=%d/%d", client.name, client.quality_profile,
+                     report["approved"], sum(r["passed"] for r in rows), len(cases))
             return report
 
     def approve_or_fallback(self, client, alternatives=(), *, force=False, allow_new=True, compatible_names=None, cached_only=False) -> bool:
@@ -300,6 +370,6 @@ def configured_client(settings, hardware=None):
         client.num_ctx, client.num_thread = policy.context, policy.threads
         client.backend_identity = hardware_key(policy.hardware)
         if policy.profile == "economic":
-            client.keep_alive = "2m"
+            client.configure_economic()
     client.recipe_policy = {"max_tokens": settings.recipes_max_tokens} if settings.recipes_enabled else None
     return client

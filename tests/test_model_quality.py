@@ -52,6 +52,12 @@ def test_unknown_accepts_natural_refusal_without_accepting_requests_for_password
 
 
 ANSWERS = {
+    "Bom dia, Luna!": "Bom dia! Como posso ajudar?",
+    "Qual é seu nome?": "Meu nome é Luna.",
+    "Estou cansado hoje.": "Entendo, tente descansar um pouco.",
+    "Quanto é 12 + 8?": "20.",
+    "Como preparo ovos mexidos?": "Bata os ovos, aqueça uma frigideira e mexa em fogo baixo até cozinhar.",
+    "Qual número estou pensando?": "Não tenho como saber o número.",
     "Bom dia!": "Bom dia! Como posso ajudar?",
     "Quanto é 15 + 27?": "42.",
     "Qual é a capital do Brasil?": "A capital do Brasil é Brasília.",
@@ -87,6 +93,7 @@ class TestModel(OllamaClient):
         other.temperature = self.temperature
         other.backend_identity = self.backend_identity
         other.recipe_policy = self.recipe_policy
+        other.quality_profile = self.quality_profile
         return other
 
     def _reply_once(self, text, on_delta=None, cancel=None, context="", max_tokens=None):
@@ -106,24 +113,72 @@ def environment():
     return {"models": {"good:7b": {}, "candidate:3b": {}}, "calls": []}
 
 
+def test_economic_suite_checks_basic_chat_and_real_command_routes(tmp_path, monkeypatch):
+    monkeypatch.setitem(ANSWERS, "Qual é seu nome?", "Meu nome é Luna.")
+    monkeypatch.setitem(ANSWERS, "Quanto é 2 + 2?", "4")
+    monkeypatch.setitem(ANSWERS, "Responda apenas sim.", "sim")
+    env = environment()
+    client = TestModel(env)
+    client.configure_economic()
+    registry = QualityRegistry(tmp_path / "quality.json")
+    report = registry.ensure(client)
+    assert report["approved"] and report["profile"] == "economic"
+    assert len(report["tests"]) == 15 and len(env["calls"]) == 13
+    assert sum(r["route"] == "deterministic" for r in report["tests"]) == 3
+    assert registry.ensure(client)["approved"] and len(env["calls"]) == 13
+    client.quality_profile = "standard"
+    assert registry.ensure(client)["approved"] and len(env["calls"]) == 24
+
+
+@pytest.mark.parametrize("case,reply", [("identity", "Sou Qwen"), ("simple_math", "5"),
+    ("simple_instruction", "Sim, posso ajudar"), ("music", ""), ("weather", "Está ensolarado"),
+    ("stop_music", "resume_video")])
+def test_economic_suite_rejects_basic_failures(case, reply):
+    assert objective_problem(case, reply)
+
+
 def test_cache_uses_all_eight_cases_and_revalidates_real_changes(tmp_path):
     env = environment()
     client = TestModel(env)
     registry = QualityRegistry(tmp_path / "quality.json")
     first = registry.ensure(client)
-    assert first["approved"] and len(first["tests"]) == 8
-    assert len(env["calls"]) == 9  # two actual turns in the context case
+    assert first["approved"] and len(first["tests"]) == 12
+    assert len(env["calls"]) == 11  # context has two turns; two commands bypass LLM
     assert registry.ensure(client)["approved"]
-    assert len(env["calls"]) == 9
+    assert len(env["calls"]) == 11
     env["template"] = "{{ .Messages }}changed {{ .Role }}"
     assert registry.ensure(client)["approved"]
-    assert len(env["calls"]) == 18
+    assert len(env["calls"]) == 22
     client.num_ctx = 8192
     assert registry.ensure(client)["approved"]
-    assert len(env["calls"]) == 27
+    assert len(env["calls"]) == 33
     env["models"][client.name]["digest"] = "new-weights"
     assert registry.ensure(client)["approved"]
-    assert len(env["calls"]) == 36
+    assert len(env["calls"]) == 44
+
+
+@pytest.mark.parametrize("reason", ["memory_insufficient", "timeout", "configuration"])
+def test_resource_failures_stop_early_and_can_recover_after_restart(tmp_path, monkeypatch, reason):
+    env = environment()
+    client = TestModel(env)
+    registry = QualityRegistry(tmp_path / "quality.json")
+    original = TestModel._reply_once
+    attempts = []
+    def fail(self, *a, **kw):
+        attempts.append(self.name)
+        raise LLMError(reason, "falha simulada")
+    monkeypatch.setattr(TestModel, "_reply_once", fail)
+    rejected = registry.ensure(client)
+    assert not rejected["approved"]
+    assert len(attempts) == len(rejected["tests"]) == 1
+    assert rejected["tests"][0]["reason"] == reason
+    assert rejected["tests"][0]["failure_kind"] == {
+        "timeout": "latency", "memory_insufficient": "resources", "configuration": "infrastructure"}[reason]
+    monkeypatch.setattr(TestModel, "_reply_once", original)
+    assert registry.ensure(client)["approved"]
+    assert len(env["calls"]) == 11
+    registry.ensure(client)
+    assert len(env["calls"]) == 11
 
 
 def test_rejected_candidate_does_not_replace_persisted_approval(tmp_path):
@@ -162,7 +217,7 @@ def test_quality_cooking_uses_the_application_recipe_route(tmp_path):
     client = TestModel(env)
     client.recipe_policy = {"max_tokens": 600}
     assert QualityRegistry(tmp_path / "quality.json").ensure(client)["approved"]
-    cooking = next(c for c in env["route_calls"] if c[0] == "Como preparar ovos mexidos?")
+    cooking = next(c for c in env["route_calls"] if c[0] == "Como preparo ovos mexidos?")
     assert cooking[2] == 600 and "Pedido sobre receita" in cooking[1]
 
 
@@ -204,7 +259,7 @@ def test_cache_needs_complete_test_evidence_not_just_an_approval_flag(tmp_path):
     data["reports"][client.quality_key]["tests"] = None
     registry.write(data)
     assert registry.ensure(client)["approved"]
-    assert len(env["calls"]) == 18
+    assert len(env["calls"]) == 22
 
 
 def test_cached_only_startup_never_runs_new_suite_and_rejected_is_not_fallback(tmp_path):

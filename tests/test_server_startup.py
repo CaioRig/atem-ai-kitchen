@@ -31,3 +31,17 @@ def test_policy_does_not_reselect_a_model_validated_by_bootstrap(tmp_path, monke
     client = SimpleNamespace(name=settings.llm_model, list_models=lambda: [{"name": "qwen2.5:7b", "size": 4 * GIB}])
     policy.configure_llm(client)
     assert client.name == "qwen2.5:7b"
+
+
+def test_server_uses_exact_model_and_options_from_bootstrap(monkeypatch):
+    import server.main as module
+    from server.services.performance import PerformancePolicy, Hardware, GIB
+    monkeypatch.setattr(module, "load_settings", lambda: Settings(auth_token="valid-test-token", llm_model="qwen2.5:7b"))
+    monkeypatch.setattr(module, "setup_logging", lambda *a: None)
+    seen = []
+    monkeypatch.setattr(module, "create_app", lambda settings: seen.append(settings) or SimpleNamespace())
+    monkeypatch.setattr(module.uvicorn, "run", lambda *a, **kw: None)
+    module.main(["--validated-llm", "--llm-model", "qwen2.5:0.5b", "--llm-context", "2048", "--llm-threads", "3"])
+    assert seen[0].llm_model == "qwen2.5:0.5b"
+    policy = PerformancePolicy(seen[0], Hardware(ram_available=12 * GIB, available_threads=8))
+    assert policy.context == 2048 and policy.threads == 3

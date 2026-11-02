@@ -6,6 +6,9 @@ from server.storage.memory import fold
 
 def video_query(text: str) -> str | None:
     text = strip_polite_prefix(strip_wake_prefix(text)).strip(" .!?")
+    music = re.fullmatch(r"(?:quero ouvir|toque|tocar|reproduza) (?:uma )?musica(?: (.{2,140}))?", fold(text))
+    if music:
+        return "música" + (" " + text[music.start(1):music.end(1)] if music.group(1) else "")
     match = re.fullmatch(
         r"(?:pesquise|busque|procure|mostre|encontre)(?: para mim)? "
         r"(?:um |o |uns )?(?:videos?|tutorial|tutoriais) (?:de |sobre |para )?"
