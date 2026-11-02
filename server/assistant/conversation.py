@@ -1,6 +1,6 @@
 """Conversa com a IA local: transcrição -> Ollama -> resposta na interface.
 
-Cada pergunta é independente (sem histórico de conversa). A memória persistente (Fase 6) entra de
+O cliente mantém poucos turnos recentes apenas em RAM. A memória persistente (Fase 6) entra de
 duas formas: comandos como "lembre que..." são resolvidos aqui mesmo, sem a IA, por
 `MemoryCommands`; perguntas comuns recebem as memórias relevantes como contexto. A Fase 7 acrescenta,
 pelo mesmo caminho, os comandos de ingredientes disponíveis ("tenho três ovos", "usei dois ovos") e,
@@ -25,6 +25,7 @@ from server.assistant.screen import parse_screen
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.weather import WeatherAssistant, WeatherIntent
 from server.services.llm import LanguageModel, LLMError
+from server.services.model_quality import response_problem, CORRUPT
 from server.services.videos import VideoSearch, video_query
 
 log = logging.getLogger("jarvis.conversation")
@@ -212,6 +213,10 @@ class Conversation:
             await self.machine.set(AssistantState.THINKING, DETAIL_THINKING)
             self.memory_replies += 1
             log.info("comando de memoria (%s) respondido", outcome.intent)  # o texto nao vai ao log
+            if outcome.event and outcome.event.get("action") in ("deleted", "cleared"):
+                clear = getattr(self.llm, "clear_history", None)
+                if clear:
+                    clear()
             await self._emit(outcome.reply, final=True)
             if outcome.event is not None and self.on_memory is not None:
                 await self.on_memory(outcome.event)
@@ -301,7 +306,9 @@ class Conversation:
                 now = loop.time()
                 if now - last_flush >= PARTIAL_INTERVAL_S:
                     last_flush = now
-                    await self._emit("".join(pieces), final=False)
+                    partial = "".join(pieces)
+                    if not response_problem(text, partial, partial=True):
+                        await self._emit(partial, final=False)
             reply = await fut
         except asyncio.CancelledError:
             raise
@@ -314,6 +321,10 @@ class Conversation:
             return
         self.last_reply_s = time.perf_counter() - t0
         if cancel.is_set():
+            return
+        problem = response_problem(text, reply)
+        if problem:
+            await self._fail(text, "corrupt_response", CORRUPT, problem, cancel)
             return
         self.replies += 1
         self.last_error = None

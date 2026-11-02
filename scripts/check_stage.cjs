@@ -35,6 +35,16 @@ const server = http.createServer((req,res) => {
     const mode=()=>page.locator('#stage-content').getAttribute('data-mode');
     const thinking=()=>send({type:'state',state:'thinking',detail:''});
     const idle=()=>send({type:'state',state:'idle',detail:''});
+    const qualityFlow = path.resolve('data/quality-flow.json');
+    if (fs.existsSync(qualityFlow)) {
+      const flow = JSON.parse(fs.readFileSync(qualityFlow, 'utf8'));
+      await thinking();
+      await send({type:'reply', text:flow.ui_websocket_text, final:true});
+      await idle();
+      assert.equal(await page.locator('#stage-scroll').textContent(), flow.ui_websocket_text);
+      assert.equal(flow.ui_websocket_text, flow.tts_input);
+      console.log('OK: saudação real do Ollama exibida integralmente, igual ao texto enviado ao TTS.');
+    }
     await thinking();await send({type:'reply',text:'Uma resposta simples.',final:true});await idle();
     assert.equal(await mode(),'reply');assert.equal(await page.locator('#reply').count(),0);
     await action('settings');await action('close');assert.equal(await mode(),'reply');

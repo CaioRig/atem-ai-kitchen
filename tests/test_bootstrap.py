@@ -42,6 +42,7 @@ def installation(tmp_path, monkeypatch):
     monkeypatch.setattr(boot, "installed_models", lambda *a: models)
     monkeypatch.setattr(boot, "api", lambda *a: {"version": "test-version"})
     monkeypatch.setattr(boot, "update_acceleration", lambda *a: None)
+    monkeypatch.setattr(boot, "validate_model_selection", lambda settings, h, **kw: {"model": settings.llm_model, "approval_key": "simulated"})
     def probe(url, name, context):
         calls["probe"].append(name)
         return {"total_s": .2, "tokens_per_s": 30, "model": name}

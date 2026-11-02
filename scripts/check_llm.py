@@ -11,7 +11,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server.services.llm import LLMError, OllamaClient  # noqa: E402
+from server.services.llm import LLMError  # noqa: E402
+from server.services.model_quality import QualityRegistry, configured_client  # noqa: E402
 from server.storage.config import ConfigError, load_settings  # noqa: E402
 
 
@@ -24,22 +25,16 @@ def main(argv: list[str]) -> int:
     if not settings.llm_enabled:
         print("IA local desativada em config/settings.toml ([llm] enabled = false)")
         return 1
-    llm = OllamaClient(
-        settings.llm_url,
-        settings.llm_model,
-        system_prompt=settings.llm_system_prompt,
-        connect_timeout_s=settings.llm_connect_timeout_s,
-        timeout_s=settings.llm_timeout_s,
-        keep_alive=settings.llm_keep_alive,
-        temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
-    )
+    llm = configured_client(settings)
     print(f"ollama={llm.address} modelo={llm.name}")
     reason = llm.check()
     if reason:
         print(f"indisponivel: {reason}")
         return 1
-    print("servidor e modelo prontos")
+    if not QualityRegistry(settings.llm_quality_path).approve_or_fallback(llm, allow_new=False):
+        print("indisponivel: modelo não aprovado nos testes de conversação")
+        return 1
+    print(f"servidor pronto; modelo aprovado: {llm.name}")
     if not argv:
         return 0
     question = " ".join(argv)

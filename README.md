@@ -15,6 +15,7 @@ na rede local.
 - Transcricao offline (whisper.cpp small-q8_0 no servidor, fim da fala por Silero VAD; medicoes da Fase 4.1): `docs/transcricao.md`
 - IA local (Ollama no servidor Ryzen, sem nuvem): `docs/ia-local.md`
 - Perfis automáticos, hardware, medições e limites conhecidos: `docs/desempenho.md`
+- Aprovação de modelos em português, histórico curto e proteção do TTS: `docs/qualidade-ia.md`
 - Voz da Luna (Kokoro-82M `pf_dora`, feminina pt-BR, sintetizada no servidor e reproduzida na cozinha): `docs/voz.md`
 - Memória local persistente (SQLite em `data/memory.sqlite3`; "Luna, lembre que…", "o que você lembra?", "esqueça que…", "apague todas as memórias" com confirmação; painel "Memória" na tela): `docs/memoria.md`
 - Palavra de ativacao: "hey Luna" em uso; treino do modelo "hey Atem" (pronuncia "ei-tem"): `docs/palavra-de-ativacao.md`

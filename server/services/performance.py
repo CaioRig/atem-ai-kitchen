@@ -262,7 +262,6 @@ class PerformancePolicy:
             elif not manual and self.settings.llm_auto_model and not self.settings.bootstrap_managed:
                 client.name = choose_model(self.models, self.hardware if self.local else None,
                                            self.profile, client.name)
-            self.settings.llm_model = client.name
             selected = next((m for m in self.models if m.get("name") == client.name), {})
             if self.local and selected.get("size", 0) > max(
                     max(0, (self.hardware.ram_available or 0) - 2 * GIB) * 0.65,
@@ -271,9 +270,9 @@ class PerformancePolicy:
             if self.local:
                 client.num_ctx = self.context
                 client.num_thread = self.threads
+                client.backend_identity = hardware_key(self.hardware)
                 if self.profile == "economic":
                     client.keep_alive = "2m"
-            self.save()
         except (OSError, ValueError, RuntimeError) as exc:
             self.notices.append(f"Otimização do Ollama indisponível: {type(exc).__name__}; configuração preservada.")
 

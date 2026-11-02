@@ -683,6 +683,23 @@ def check_only(root: Path, hardware: Hardware) -> int:
     return 1
 
 
+def validate_model_selection(settings, hardware: Hardware, *, force=False) -> dict:
+    from server.services.model_quality import QualityRegistry, configured_client
+    client = configured_client(settings, hardware)
+    models = installed_models(settings.llm_url)
+    limit = {"economic": 2.5, "balanced": 5, "performance": 10}[performance_profile(settings, hardware)] * GIB
+    budget = max(max(0, (hardware.ram_available or 0) - 2 * GIB) * .65,
+                 max(0, (hardware.vram or 0) - 1.5 * GIB) if hardware.acceleration_verified else 0)
+    alternatives = [m["name"] for m in models if isinstance(m.get("size"), (int, float))
+                    and 0 < m["size"] <= min(limit, budget) and m.get("name") != client.name]
+    registry = QualityRegistry(settings.llm_quality_path)
+    if not registry.approve_or_fallback(client, alternatives if settings.llm_auto_model else (),
+            force=force, allow_new=settings.llm_auto_model, compatible_names=alternatives):
+        raise BootstrapError("IA indisponível: nenhum modelo passou nos oito testes de qualidade. O último modelo aprovado e as preferências foram preservados. Consulte data/model-quality.json.")
+    settings.llm_model = client.name
+    return {"model": client.name, "approval_key": client.quality_key, "notice": client.recovery_notice}
+
+
 def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
     from server.storage.config import Settings, apply_automatic_settings
     state_path = root / "data/bootstrap-state.json"
@@ -719,6 +736,8 @@ def prepare(root: Path, options, owned: list[subprocess.Popen]) -> dict:
             state.pop("probe_identity", None)
         model, evaluation = configure_models(settings, catalog, hardware, state, options.offline)
         state.update(evaluation)
+        state["quality"] = validate_model_selection(settings, hardware, force=options.reprobe)
+        model = settings.llm_model
     else:
         model = settings.llm_model
     # Only settings created/owned by bootstrap get automatic ASR/TTS paths. Individual TOML edits win.

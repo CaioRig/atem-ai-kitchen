@@ -39,7 +39,8 @@ from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
 from server.assistant.weather import WeatherAssistant
 from server.services.llm import LanguageModel, OllamaClient
-from server.services.performance import PerformancePolicy, gpu_utilization
+from server.services.performance import GIB, PerformancePolicy, gpu_utilization
+from server.services.model_quality import QualityRegistry
 from server.services.transcriber import Transcriber, TranscriberUnavailable, WhisperCppTranscriber
 from server.services.tts import KokoroSynthesizer, PiperSynthesizer, Synthesizer, TtsUnavailable
 from server.services.vad import SileroVad, SpeechDetector, VadUnavailable
@@ -159,7 +160,10 @@ def load_llm(settings: Settings) -> LanguageModel | None:
         keep_alive=settings.llm_keep_alive,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
+        top_p=settings.llm_top_p,
+        repeat_penalty=settings.llm_repeat_penalty,
     )
+    client.recipe_policy = {"max_tokens": settings.recipes_max_tokens} if settings.recipes_enabled else None
     log.info("IA local: modelo %s em %s", client.name, client.address)
     return client
 
@@ -305,6 +309,10 @@ def create_app(
     async def on_reply(text: str, final: bool) -> None:
         if final:
             llm_status["reason"] = ""
+            if isinstance(llm, OllamaClient) and llm.recovery_notice:
+                await hub.broadcast({"type": "screen", "action": "notice", "message": llm.recovery_notice})
+                performance.notices.append(llm.recovery_notice)
+                llm.recovery_notice = ""
             await asyncio.to_thread(performance.observe, llm)
         event = {"type": "reply", "text": text, "final": final}
         if conversation.view_kind == "recipe":
@@ -510,9 +518,26 @@ def create_app(
     async def lifespan(_: FastAPI):
         if isinstance(llm, OllamaClient):
             await asyncio.to_thread(performance.configure_llm, llm)
+            registry = QualityRegistry(settings.llm_quality_path)
+            hardware = performance.hardware
+            budget = max(max(0, (hardware.ram_available or 0) - 2 * GIB) * .65,
+                         max(0, (hardware.vram or 0) - 1.5 * GIB) if hardware.acceleration_verified else 0)
+            limit = {"economic": 2.5, "balanced": 5, "performance": 10}[performance.profile] * GIB
+            compatible = [m.get("name") for m in performance.models if m.get("name")
+                          and isinstance(m.get("size"), (int, float)) and 0 < m["size"] <= min(limit, budget)]
+            alternatives = compatible if settings.llm_auto_model else []
+            passed = await asyncio.to_thread(registry.approve_or_fallback, llm, alternatives,
+                                             allow_new=settings.llm_auto_model, compatible_names=compatible)
+            if not passed:
+                llm_status["reason"] = llm.approval_error
+            else:
+                settings.llm_model = llm.name
+                if llm.recovery_notice:
+                    performance.notices.append(llm.recovery_notice)
+                await asyncio.to_thread(performance.save)
         await machine.set(AssistantState.IDLE)
         log.info("servidor pronto em %s://%s:%s", settings.scheme, settings.bind_host, settings.port)
-        check_task = asyncio.create_task(check_llm())
+        check_task = asyncio.create_task(check_llm()) if not isinstance(llm, OllamaClient) or not llm.approval_error else None
         warm_task = asyncio.create_task(speech.warmup())
         weather_task = asyncio.create_task(weather.run_daily(on_weather)) if weather and settings.weather_auto_refresh else None
         try:
@@ -521,7 +546,8 @@ def create_app(
             if weather_task:
                 weather_task.cancel()
                 await asyncio.gather(weather_task, return_exceptions=True)
-        check_task.cancel()
+        if check_task:
+            check_task.cancel()
         warm_task.cancel()
         await speech.stop()
         await machine.set(AssistantState.OFFLINE, "desligando")
@@ -715,6 +741,10 @@ async def _handle_message(
         await ws.send_json({"type": "pong", "t": msg.t})
     elif isinstance(msg, (MemoryList, MemoryDelete, MemoryClear)):
         await _handle_memory(ws, msg, memory, hub)
+        if isinstance(msg, MemoryDelete) or isinstance(msg, MemoryClear) and msg.confirm:
+            clear = getattr(conversation.llm, "clear_history", None)
+            if clear:
+                clear()
     elif isinstance(msg, SetState):
         if not settings.debug_allow_state_override:
             await ws.send_json(error("forbidden", "set_state desabilitado (debug_allow_state_override=false)"))

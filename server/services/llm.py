@@ -30,6 +30,10 @@ LUNA_SYSTEM_PROMPT = """Você é a Luna, assistente virtual da cozinha de uma ca
 
 Personalidade: acolhedora, prática e objetiva. Fala sempre em português do Brasil, em tom natural e simpático, como alguém da família que entende de cozinha.
 
+Responda diretamente ao que a pessoa perguntou, inclusive perguntas gerais e contas. Não diga que a pergunta é desnecessária nem desvie toda resposta para a cozinha. Evite convites repetidos para ajudar; quando houver uma instrução de formato exato, siga-a.
+
+Não tenho acesso aos pensamentos, senhas ou informações privadas não fornecidas pela pessoa. Quando perguntarem por algo assim, diga claramente que não sabe e não pode adivinhar. Não peça senhas nem pistas para descobri-las.
+
 Suas respostas são curtas por padrão, de uma a três frases, porque serão lidas em uma tela na cozinha e, mais tarde, faladas em voz alta. Só se alongue quando a pessoa pedir detalhes, como o passo a passo de uma receita; nesse caso use frases simples e numere os passos.
 
 Foco: receitas e técnicas de cozinha, substituições de ingredientes, medidas e conversões, conservação de alimentos, organização e limpeza da cozinha, planejamento de refeições, conversa leve e informações úteis do dia a dia.
@@ -111,6 +115,8 @@ class OllamaClient:
         keep_alive: str = "10m",
         temperature: float = 0.7,
         max_tokens: int = 300,
+        top_p: float | None = None,
+        repeat_penalty: float | None = None,
     ) -> None:
         problem = local_url_problem(url)
         if problem:
@@ -120,6 +126,7 @@ class OllamaClient:
         self.host = parts.hostname or "127.0.0.1"
         self.port = parts.port or (443 if self.secure else DEFAULT_PORT)
         self.name = model
+        self.url = url
         self.system_prompt = system_prompt or LUNA_SYSTEM_PROMPT
         self.connect_timeout_s = connect_timeout_s
         self.timeout_s = timeout_s
@@ -129,6 +136,70 @@ class OllamaClient:
         self.num_ctx = 0
         self.num_thread = 0
         self.last_metrics: dict = {}
+        self.top_p = top_p
+        self.repeat_penalty = repeat_penalty
+        self._history: list[dict] = []  # volatile, bounded; never written to persistent memory
+        self._history_at = 0.0
+        self.quality_registry = None
+        self.quality_signature = ""
+        self.quality_key = ""
+        self.approval_error = ""
+        self.recovery_notice = ""
+        self.backend_identity = {}
+        self.recipe_policy = None
+
+    def options(self, max_tokens: int | None = None) -> dict:
+        options = {"temperature": self.temperature, "num_predict": max_tokens or self.max_tokens}
+        qwen = bool(re.match(r"^qwen2\.5:(?:7b|14b|1\.5b)(?:-|$)", self.name))
+        top_p = self.top_p if self.top_p is not None else .8 if qwen else None
+        penalty = self.repeat_penalty if self.repeat_penalty is not None else (1.1 if ":1.5b" in self.name else 1.05) if qwen else None
+        if top_p is not None:
+            options["top_p"] = top_p
+        if penalty is not None:
+            options["repeat_penalty"] = penalty
+        if self.num_ctx:
+            options["num_ctx"] = self.num_ctx
+        if self.num_thread:
+            options["num_thread"] = self.num_thread
+        return options
+
+    def clone(self, name: str | None = None):
+        other = OllamaClient(self.url, name or self.name, system_prompt=self.system_prompt,
+            connect_timeout_s=self.connect_timeout_s, timeout_s=self.timeout_s, keep_alive=self.keep_alive,
+            temperature=self.temperature, max_tokens=self.max_tokens, top_p=self.top_p, repeat_penalty=self.repeat_penalty)
+        other.num_ctx, other.num_thread = self.num_ctx, self.num_thread
+        other.backend_identity = self.backend_identity
+        other.recipe_policy = self.recipe_policy
+        return other
+
+    def clear_history(self) -> None:
+        self._history = []
+        self._history_at = 0.0
+
+    def adopt(self, other) -> None:
+        for field in ("name", "num_ctx", "num_thread", "quality_registry", "quality_signature", "quality_key", "approval_error"):
+            setattr(self, field, getattr(other, field))
+
+    def request_json(self, path: str, body: dict | None = None) -> dict:
+        conn = self._connect()
+        try:
+            if conn.sock:
+                conn.sock.settimeout(min(5.0, self.timeout_s))
+            conn.request("POST" if body is not None else "GET", path,
+                         body=json.dumps(body).encode() if body is not None else None,
+                         headers={"Content-Type": "application/json"})
+            response = conn.getresponse()
+            data = response.read(2_000_000)
+            if response.status != 200:
+                raise self._http_error(response.status, data)
+            result = json.loads(data)
+            if not isinstance(result, dict) or result.get("error"):
+                raise LLMError("bad_response", "Resposta inesperada ao inspecionar a IA local.")
+            return result
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            raise LLMError("inspection_failed", "Não foi possível verificar o modelo local.", type(exc).__name__) from exc
+        finally:
+            conn.close()
 
     def list_models(self) -> list[dict]:
         conn = self._connect()
@@ -200,6 +271,35 @@ class OllamaClient:
         context: str = "",
         max_tokens: int | None = None,
     ) -> str:
+        from server.services.model_quality import QualityRegistry, local_signature, UNAVAILABLE
+        if self.approval_error:
+            raise LLMError("quality_unavailable", self.approval_error)
+        if self.quality_registry and self.quality_signature != local_signature(self):
+            if not QualityRegistry(self.quality_registry).approve_or_fallback(self):
+                raise LLMError("quality_unavailable", UNAVAILABLE)
+        try:
+            return self._reply_once(text, on_delta, cancel, context, max_tokens)
+        except LLMError as exc:
+            if exc.code != "corrupt_response" or not self.quality_registry or (cancel and cancel.is_set()):
+                raise
+            registry = QualityRegistry(self.quality_registry)
+            registry.invalidate(self, exc.detail)
+            alternate = registry.runtime_alternative(self)
+            if alternate is None:
+                self.approval_error = UNAVAILABLE
+                raise
+            previous = self.name
+            self.adopt(alternate)
+            self.recovery_notice = f"Falha na geração com {previous}; usando {self.name}, previamente aprovado."
+            try:
+                return self._reply_once(text, on_delta, cancel, context, max_tokens)  # exactly one recovery attempt
+            except LLMError as recovery_error:
+                registry.invalidate(self, recovery_error.code)
+                self.approval_error = UNAVAILABLE
+                raise
+
+    def _reply_once(self, text, on_delta=None, cancel=None, context="", max_tokens=None) -> str:
+        from server.services.model_quality import response_problem, CORRUPT
         text = text.strip()[:MAX_PROMPT_CHARS]
         if not text:
             raise LLMError("empty_prompt", "Não entendi nada para responder.")
@@ -210,12 +310,18 @@ class OllamaClient:
             "model": self.name,
             "stream": True,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": self.temperature, "num_predict": max_tokens or self.max_tokens},
+            "options": self.options(max_tokens),
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": text},
             ],
         }
+        if time.monotonic() - self._history_at > 1800:
+            self._history = []
+        history_budget = max(0, min(8000, (self.num_ctx or 4096) * 2 - len(system) - len(text)))
+        while sum(len(m["content"]) for m in self._history) > history_budget and self._history:
+            self._history = self._history[2:]
+        payload["messages"].extend(self._history)
+        payload["messages"].append({"role": "user", "content": text})
         if cancel is not None and cancel.is_set():
             return ""
         conn = self._connect()
@@ -227,6 +333,7 @@ class OllamaClient:
         first_token = None
         self.last_metrics = {}
         pieces: list[str] = []
+        completed = False
         try:
             try:
                 conn.request(
@@ -261,12 +368,18 @@ class OllamaClient:
                     raise LLMError("server", "O Ollama devolveu um erro ao gerar a resposta.", str(obj["error"])[:300])
                 piece = (obj.get("message") or {}).get("content") or ""
                 if piece:
+                    if not isinstance(piece, str):
+                        raise LLMError("bad_response", "A IA enviou texto inválido.")
+                    problem = response_problem(text, "".join(pieces) + piece, partial=True)
+                    if problem:
+                        raise LLMError("corrupt_response", CORRUPT, problem)
                     if first_token is None:
                         first_token = time.perf_counter() - started
                     pieces.append(piece)
                     if on_delta is not None:
                         on_delta(piece)
                 if obj.get("done"):
+                    completed = True
                     duration = obj.get("eval_duration", 0) / 1e9
                     self.last_metrics = {"ttft_s": first_token, "total_s": time.perf_counter() - started,
                         "tokens_per_s": obj.get("eval_count", 0) / duration if duration else None,
@@ -276,9 +389,19 @@ class OllamaClient:
             conn.close()
         if cancel is not None and cancel.is_set():
             return ""
+        if not completed:
+            raise LLMError("incomplete_stream", "A resposta da IA foi interrompida. Tente novamente.")
         reply = clean_reply("".join(pieces))
         if not reply:
             raise LLMError("empty", "A IA não devolveu nenhuma resposta. Tente perguntar de novo.")
+        problem = response_problem(text, reply)
+        if problem:
+            raise LLMError("corrupt_response", CORRUPT, problem)
+        self._history.extend([{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
+        self._history = self._history[-6:]
+        while sum(len(m["content"]) for m in self._history) > 8000 and len(self._history) >= 2:
+            self._history = self._history[2:]
+        self._history_at = time.monotonic()
         return reply
 
     def _http_error(self, status: int, body: bytes) -> LLMError:

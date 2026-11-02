@@ -58,6 +58,9 @@ class Settings:
     llm_model: str = "qwen2.5:7b"
     llm_auto_model: bool = False  # existing TOML model choices remain manual
     llm_num_ctx: int = 0
+    llm_top_p: float | None = None
+    llm_repeat_penalty: float | None = None
+    llm_quality_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data/model-quality.json")
     llm_system_prompt: str = ""  # vazio = instrucao padrao da Luna (server/services/llm.py)
     llm_connect_timeout_s: float = 5.0
     llm_timeout_s: float = 60.0
@@ -143,6 +146,10 @@ class Settings:
                 raise ConfigError("llm.max_tokens deve ser maior que zero")
             if self.llm_num_ctx < 0:
                 raise ConfigError("llm.num_ctx não pode ser negativo")
+            if self.llm_top_p is not None and not 0 < self.llm_top_p <= 1:
+                raise ConfigError("llm.top_p deve estar entre 0 e 1")
+            if self.llm_repeat_penalty is not None and not 0 < self.llm_repeat_penalty <= 2:
+                raise ConfigError("llm.repeat_penalty deve estar entre 0 e 2")
         if self.tts_enabled:
             if self.tts_engine not in ("kokoro", "piper"):
                 raise ConfigError(f"tts.engine invalido: {self.tts_engine!r}; use \"kokoro\" ou \"piper\"")
@@ -222,6 +229,9 @@ class Settings:
             bootstrap_managed=bool(bootstrap.get("managed", False)),
             llm_auto_model=bool(llm.get("automatic_model", False)),
             llm_num_ctx=int(llm.get("num_ctx", 0)),
+            llm_top_p=float(llm["top_p"]) if "top_p" in llm else None,
+            llm_repeat_penalty=float(llm["repeat_penalty"]) if "repeat_penalty" in llm else None,
+            llm_quality_path=PROJECT_ROOT / str(llm.get("quality_path", "data/model-quality.json")),
             performance_profile=str(performance.get("profile", "automatic")),
             performance_path=PROJECT_ROOT / str(performance.get("path", "data/performance.json")),
             bind_host=str(srv.get("bind_host", "127.0.0.1")),

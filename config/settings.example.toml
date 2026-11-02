@@ -68,6 +68,10 @@ done_hold_s = 4.0
 # Configurações antigas são manuais. O inicializador novo habilita automatic_model.
 # automatic_model = false
 # num_ctx = 0  # zero = política de contexto existente
+# top_p e repeat_penalty vazios/ausentes usam as opções específicas do modelo.
+# top_p = 0.8
+# repeat_penalty = 1.05
+# quality_path = "data/model-quality.json"  # aprovação local obrigatória, com cache
 # Configurações antigas são manuais. O inicializador novo habilita automatic_model.
 # automatic_model = false
 # num_ctx = 0  # zero = política de contexto existente

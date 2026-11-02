@@ -110,13 +110,38 @@ def test_reply_streams_pieces_and_sends_system_prompt(ollama):
     assert req["stream"] is True and req["model"] == "qwen2.5:7b"
     assert [m["role"] for m in req["messages"]] == ["system", "user"]
     assert "Luna" in req["messages"][0]["content"] and req["messages"][1]["content"] == "oi luna"
-    assert req["options"] == {"temperature": 0.7, "num_predict": 300} and req["keep_alive"] == "10m"
+    assert req["options"] == {"temperature": 0.7, "num_predict": 300, "top_p": 0.8, "repeat_penalty": 1.05} and req["keep_alive"] == "10m"
 
 
 def test_custom_system_prompt_is_used(ollama):
     c = client(ollama, system_prompt="Responda só com sim ou não.")
     c.reply("teste")
     assert ollama.requests[0]["messages"][0]["content"] == "Responda só com sim ou não."
+
+
+def test_short_history_keeps_whole_turns_and_can_be_cleared(ollama):
+    c = client(ollama)
+    c.num_ctx = 4096
+    c.reply("Meu nome é Ana.")
+    c.reply("Qual é meu nome?")
+    messages = ollama.requests[-1]["messages"]
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1]["content"] == "Meu nome é Ana."
+    for index in range(5):
+        c.reply(f"Pergunta {index}")
+    assert len(c._history) == 6
+    c.clear_history()
+    c.reply("Outro assunto")
+    assert len(ollama.requests[-1]["messages"]) == 2
+
+
+def test_sampling_overrides_are_respected_without_forcing_other_families(ollama):
+    c = client(ollama, top_p=.9, repeat_penalty=1.2)
+    c.reply("teste")
+    assert ollama.requests[-1]["options"]["top_p"] == .9
+    assert ollama.requests[-1]["options"]["repeat_penalty"] == 1.2
+    other = OllamaClient(ollama.url, "other-chat:7b")
+    assert "top_p" not in other.options() and "repeat_penalty" not in other.options()
 
 
 def test_missing_model_is_reported_with_pull_hint(ollama):
