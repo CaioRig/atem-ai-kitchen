@@ -53,3 +53,12 @@
 - Informe arquivos alterados.
 - Informe testes executados e seus resultados.
 - Se não conseguir concluir, explique o bloqueio.
+
+## Implementação de modelos Ollama
+
+- A especificação está em docs/model-selection-spec.md.
+- O progresso está em docs/model-selection-progress.md.
+- Execute somente a etapa solicitada.
+- Consulte o progresso antes de modificar o código.
+- Atualize o progresso após cada etapa validada.
+- Nunca avance automaticamente para outra etapa.
