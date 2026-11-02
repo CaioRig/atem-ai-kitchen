@@ -162,3 +162,7 @@ stale_after_s = 21600
 retry_cooldown_s = 60
 # Arquivo do cache. Vazio = o mesmo de [memory] path (tabela separada).
 cache_path = ""
+[performance]
+# automatic | economic | balanced | performance. Interface configurável no painel.
+profile = "automatic"
+path = "data/performance.json"

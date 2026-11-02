@@ -71,6 +71,7 @@ class Speech:
         self.failures = 0
         self.last_synthesis_s = 0.0  # do texto pronto ate o primeiro trecho de audio
         self.last_audio_s = 0.0  # duracao do audio da ultima fala
+        self.last_total_s = 0.0
         self.last_error: tuple[str, str] | None = None
 
     @property
@@ -213,6 +214,7 @@ class Speech:
             await self._fail(uid, started, "empty", "Não consegui gerar o áudio desta resposta.", "", cancel)
             return
         self.last_audio_s = samples / rate
+        self.last_total_s = time.perf_counter() - t0
         log.info(
             "voz: primeiro trecho em %.2f s, %.1f s de audio sintetizados em %.2f s (%d caracteres)",
             self.last_synthesis_s, self.last_audio_s, time.perf_counter() - t0, len(text),

@@ -437,3 +437,8 @@ button:focus-visible, select:focus-visible { outline: 3px solid #9cdfff; outline
   .show-content #panel { grid-column: 2; grid-row: 1; }
   .show-content #indicators { max-height: 55dvh; }
 }
+html.economic-client *, html.economic-client *::before, html.economic-client *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+}

@@ -117,7 +117,16 @@ def split_sentences(text: str, max_chars: int = MAX_SENTENCE_CHARS, min_chars: i
                     chunk = f"{chunk} {clause}".strip()
             if chunk:
                 pieces.append((chunk, SENTENCE_PAUSE_S))
-    return pieces
+    bounded: list[tuple[str, float]] = []
+    for text, pause in pieces:
+        while len(text) > max_chars:
+            split = text.rfind(" ", 0, max_chars + 1)
+            if split < 1:
+                break
+            bounded.append((text[:split], CLAUSE_PAUSE_S))
+            text = text[split:].strip()
+        bounded.append((text, pause))
+    return bounded
 
 
 def _pcm16(audio: np.ndarray, volume: float, sample_rate: int, pause_s: float) -> bytes:
@@ -143,6 +152,8 @@ class KokoroSynthesizer:
         language: str = "pt-br",
         speed: float = 1.0,
         volume: float = 1.0,
+        threads: int = 0,
+        segment_chars: int = MAX_SENTENCE_CHARS,
     ) -> None:
         try:
             from kokoro_onnx import Kokoro
@@ -151,7 +162,21 @@ class KokoroSynthesizer:
         for p in (model_path, voices_path):
             if not p.is_file():
                 raise TtsUnavailable(f"modelo nao encontrado: {p.name}; execute scripts/prepare_models.py kokoro")
-        self._kokoro = Kokoro(str(model_path), str(voices_path))
+        if threads and hasattr(Kokoro, "from_session"):
+            import onnxruntime as rt
+            options = rt.SessionOptions()
+            options.intra_op_num_threads = threads
+            options.inter_op_num_threads = 1
+            try:
+                from kokoro_onnx.session import resolve_providers
+                providers = resolve_providers()
+            except ImportError:
+                providers = ["CPUExecutionProvider"]
+            session = rt.InferenceSession(str(model_path), sess_options=options, providers=providers)
+            self._kokoro = Kokoro.from_session(session, str(voices_path))
+        else:
+            self._kokoro = Kokoro(str(model_path), str(voices_path))
+        self.segment_chars = segment_chars
         if voice not in self._kokoro.voices:
             pt = [v for v in self._kokoro.get_voices() if v in KOKORO_PT_VOICES]
             raise TtsUnavailable(f"voz '{voice}' nao existe em {voices_path.name}; em portugues: {', '.join(pt) or '-'}")
@@ -164,7 +189,7 @@ class KokoroSynthesizer:
         self._lock = threading.Lock()  # o espeak-ng tem estado global; uma sintese por vez
 
     def synthesize(self, text: str, cancel: threading.Event | None = None) -> Iterator[bytes]:
-        for sentence, pause in split_sentences(text):
+        for sentence, pause in split_sentences(text, self.segment_chars):
             if cancel is not None and cancel.is_set():
                 return
             with self._lock:

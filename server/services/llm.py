@@ -13,6 +13,7 @@ import logging
 import re
 import socket
 import threading
+import time
 from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
@@ -123,6 +124,28 @@ class OllamaClient:
         self.keep_alive = keep_alive
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.num_ctx = 0
+        self.num_thread = 0
+        self.last_metrics: dict = {}
+
+    def list_models(self) -> list[dict]:
+        conn = self._connect()
+        try:
+            if conn.sock is not None:
+                conn.sock.settimeout(min(5.0, self.timeout_s))
+            conn.request("GET", "/api/tags")
+            response = conn.getresponse()
+            body = response.read(1_000_000)
+            if response.status != 200:
+                raise LLMError("server", "Falha ao listar modelos locais")
+            models = json.loads(body).get("models", [])
+            if not isinstance(models, list):
+                raise ValueError("Catálogo de modelos inválido")
+            return [m for m in models if isinstance(m, dict)]
+        except (OSError, http.client.HTTPException) as exc:
+            raise LLMError("unreachable", self._unreachable_msg()) from exc
+        finally:
+            conn.close()
 
     @property
     def address(self) -> str:
@@ -194,6 +217,13 @@ class OllamaClient:
         if cancel is not None and cancel.is_set():
             return ""
         conn = self._connect()
+        if self.num_ctx:
+            payload["options"]["num_ctx"] = self.num_ctx
+        if self.num_thread:
+            payload["options"]["num_thread"] = self.num_thread
+        started = time.perf_counter()
+        first_token = None
+        self.last_metrics = {}
         pieces: list[str] = []
         try:
             try:
@@ -229,10 +259,16 @@ class OllamaClient:
                     raise LLMError("server", "O Ollama devolveu um erro ao gerar a resposta.", str(obj["error"])[:300])
                 piece = (obj.get("message") or {}).get("content") or ""
                 if piece:
+                    if first_token is None:
+                        first_token = time.perf_counter() - started
                     pieces.append(piece)
                     if on_delta is not None:
                         on_delta(piece)
                 if obj.get("done"):
+                    duration = obj.get("eval_duration", 0) / 1e9
+                    self.last_metrics = {"ttft_s": first_token, "total_s": time.perf_counter() - started,
+                        "tokens_per_s": obj.get("eval_count", 0) / duration if duration else None,
+                        "load_s": obj.get("load_duration", 0) / 1e9, "model": self.name}
                     break
         finally:
             conn.close()

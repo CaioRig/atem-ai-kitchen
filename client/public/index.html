@@ -83,7 +83,13 @@
     </main>
     <section id="settings-panel" class="hidden" role="dialog" aria-labelledby="settings-title">
       <header><h2 id="settings-title">Do seu jeito</h2><button id="settings-close" class="pill" type="button">Fechar</button></header>
-      <p>Ajustes salvos neste navegador.</p>
+      <p>Ajustes visuais salvos neste navegador. Desempenho e voz salvos no servidor.</p>
+      <div class="setting-row"><label for="performance-profile">Desempenho do servidor</label><select id="performance-profile"><option value="automatic">Automático</option><option value="economic">Econômico</option><option value="balanced">Equilibrado</option><option value="performance">Desempenho</option></select></div>
+      <div class="setting-row"><label for="performance-model">Modelo de IA</label><select id="performance-model"><option value="">Seleção automática</option></select></div>
+      <div class="setting-row"><label for="performance-voice">Voz Kokoro</label><select id="performance-voice"><option value="">Automática (feminina pt-BR)</option><option value="pf_dora">Dora · feminina pt-BR</option><option value="pm_alex">Alex · português</option><option value="pm_santa">Santa · português</option></select></div>
+      <p id="performance-hardware" class="muted">Conecte ao servidor para identificar o hardware.</p>
+      <div class="setting-row"><button id="performance-save" class="pill" type="button">Salvar desempenho</button><button id="performance-reset" class="pill" type="button">Restaurar automático</button></div>
+      <p id="performance-status" role="status" class="muted"></p>
       <div class="setting-row"><span>Tamanho do texto · <output id="text-size">100%</output></span><div><button id="text-smaller" class="pill" type="button" aria-label="Diminuir texto">A−</button><button id="text-larger" class="pill" type="button" aria-label="Aumentar texto">A+</button></div></div>
       <div class="setting-row"><label for="forecast-duration">Previsão na tela</label><select id="forecast-duration"><option value="5">5 segundos</option><option value="10">10 segundos</option><option value="15" selected>15 segundos</option><option value="25">25 segundos</option><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="120">2 minutos</option><option value="300">5 minutos</option></select></div>
       <div class="setting-row"><button id="fullscreen" class="pill" type="button">Entrar / sair de tela cheia</button><button id="visual-reset" class="pill" type="button">Restaurar visual padrão</button></div>

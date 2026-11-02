@@ -6,9 +6,10 @@ import json
 import logging
 import secrets
 import time
+from dataclasses import replace
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -38,6 +39,7 @@ from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
 from server.assistant.weather import WeatherAssistant
 from server.services.llm import LanguageModel, OllamaClient
+from server.services.performance import PerformancePolicy, gpu_utilization
 from server.services.transcriber import Transcriber, TranscriberUnavailable, WhisperCppTranscriber
 from server.services.tts import KokoroSynthesizer, PiperSynthesizer, Synthesizer, TtsUnavailable
 from server.services.vad import SileroVad, SpeechDetector, VadUnavailable
@@ -180,6 +182,8 @@ def load_synthesizer(settings: Settings) -> tuple[Synthesizer | None, str]:
                 language=settings.tts_language,
                 speed=settings.tts_speed,
                 volume=settings.tts_volume,
+                threads=settings.tts_threads,
+                segment_chars=settings.tts_segment_chars,
             )
         log.info("voz: %s (%s, %d Hz) carregada em %.1f s", tts.name, tts.voice, tts.sample_rate, time.perf_counter() - t0)
         return tts, ""
@@ -267,6 +271,9 @@ def create_app(
     hub = Hub()
     machine = StateMachine(AssistantState.BOOTING)
     started_at = time.time()
+    performance = PerformancePolicy(settings)
+    interaction_started = 0.0
+    last_interaction_s = 0.0
     wake_reason = stt_reason = tts_reason = memory_reason = ""
     llm_status = {"reason": ""}  # motivo da indisponibilidade da IA na ultima verificacao
     if detector is None:
@@ -279,6 +286,15 @@ def create_app(
         vad = load_vad(settings)
     if synthesizer is None:
         synthesizer, tts_reason = load_synthesizer(settings)
+        # Recover only with an already installed supported voice; never download a model.
+        piper_path = settings.tts_model.parent / "pt_BR-faber-medium.onnx"
+        if synthesizer is None and settings.tts_enabled and settings.tts_engine == "kokoro" and piper_path.is_file():
+            alternate, _ = load_synthesizer(replace(settings, tts_engine="piper", tts_model=piper_path))
+            if alternate is not None:
+                synthesizer = alternate
+                settings.tts_engine, settings.tts_model = "piper", piper_path
+                performance.notices.append("Kokoro indisponível: usando a voz alternativa Piper já instalada (masculina pt-BR). Restaure os arquivos Kokoro e reinicie para voltar à voz feminina.")
+                tts_reason = ""
     if memory is None:
         memory, memory_reason = load_memory(settings)
     weather, weather_reason = load_weather(settings, weather_source)
@@ -289,6 +305,7 @@ def create_app(
     async def on_reply(text: str, final: bool) -> None:
         if final:
             llm_status["reason"] = ""
+            await asyncio.to_thread(performance.observe, llm)
         event = {"type": "reply", "text": text, "final": final}
         if conversation.view_kind == "recipe":
             event["view"] = "recipe"
@@ -479,12 +496,20 @@ def create_app(
             log.info("IA local pronta: modelo %s", llm.name)
 
     async def on_state(state: AssistantState, detail: str) -> None:
+        nonlocal interaction_started, last_interaction_s
+        if state == AssistantState.WAKE:
+            interaction_started = time.perf_counter()
+        elif state == AssistantState.IDLE and interaction_started:
+            last_interaction_s = time.perf_counter() - interaction_started
+            interaction_started = 0.0
         await hub.broadcast({"type": "state", **machine.snapshot()})
 
     machine.subscribe(on_state)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        if isinstance(llm, OllamaClient):
+            await asyncio.to_thread(performance.configure_llm, llm)
         await machine.set(AssistantState.IDLE)
         log.info("servidor pronto em %s://%s:%s", settings.scheme, settings.bind_host, settings.port)
         check_task = asyncio.create_task(check_llm())
@@ -514,6 +539,40 @@ def create_app(
     app.state.speech = speech
     app.state.memory = memory
     app.state.weather = weather
+    app.state.performance = performance
+
+    def authorize(request: Request) -> None:
+        supplied = request.headers.get("authorization", "")
+        if not secrets.compare_digest(supplied, f"Bearer {settings.auth_token}"):
+            raise HTTPException(401, "Não autorizado")
+
+    @app.get("/api/performance")
+    async def performance_info(request: Request) -> JSONResponse:
+        authorize(request)
+        snapshot = performance.snapshot()
+        snapshot["resources"]["gpu_utilization_percent"] = await asyncio.to_thread(gpu_utilization)
+        return JSONResponse({**snapshot, "latency": {
+            "detection_ms_per_frame": pipeline.detect_ms,
+            "capture_s": pipeline.last_capture_s, "transcription_s": pipeline.last_stt_s,
+            "llm_first_token_s": conversation.last_first_token_s, "llm_total_s": conversation.last_reply_s,
+            "tts_first_audio_s": speech.last_synthesis_s, "tts_total_s": speech.last_total_s,
+            "interaction_s": last_interaction_s}})
+
+    @app.put("/api/performance")
+    async def performance_update(request: Request) -> JSONResponse:
+        authorize(request)
+        if len(await request.body()) > 4096:
+            raise HTTPException(413, "Preferências muito grandes")
+        try:
+            preferences = performance.validate(await request.json())
+            if preferences["model"] and preferences["model"] not in [m.get("name") for m in performance.models]:
+                raise ValueError("Selecione um modelo instalado no Ollama")
+            await asyncio.to_thread(performance.save, preferences)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(503, "Não foi possível salvar as preferências") from exc
+        return JSONResponse(performance.snapshot())
 
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -542,6 +601,8 @@ def create_app(
                 "replies": conversation.replies,
                 "reply_failures": conversation.failures,
                 "last_reply_s": round(conversation.last_reply_s, 2),
+                "last_first_token_s": round(conversation.last_first_token_s, 3),
+                "last_interaction_s": round(last_interaction_s, 3),
                 "memory_commands": conversation.memory_replies,
                 "memory_failures": memory_commands.failures if memory_commands else 0,
                 "weather_replies": conversation.weather_replies,

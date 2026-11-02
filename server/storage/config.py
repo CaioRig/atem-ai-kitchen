@@ -18,6 +18,8 @@ class ConfigError(RuntimeError):
 
 @dataclass
 class Settings:
+    performance_profile: str = "automatic"
+    performance_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "performance.json")
     bind_host: str = "127.0.0.1"
     port: int = 8800
     # HTTPS opcional (certificado + chave PEM). Navegadores so liberam o microfone em contexto
@@ -61,6 +63,8 @@ class Settings:
     # Voz da Luna (sintese local no servidor; reproducao no quiosque). Motor "kokoro" (padrao, voz feminina
     # pt-BR pf_dora) ou "piper" (vozes oficiais pt-BR masculinas). Arquivos: scripts/prepare_models.py kokoro
     tts_enabled: bool = True
+    tts_threads: int = 0
+    tts_segment_chars: int = 160
     tts_engine: str = "kokoro"
     tts_model: Path = field(default_factory=lambda: PROJECT_ROOT / "models" / "tts" / "kokoro-v1.0.onnx")
     tts_voices: Path = field(default_factory=lambda: PROJECT_ROOT / "models" / "tts" / "voices-v1.0.bin")  # so kokoro
@@ -106,6 +110,8 @@ class Settings:
         return "https" if self.tls_enabled else "http"
 
     def validate(self) -> None:
+        if self.performance_profile not in ("automatic", "economic", "balanced", "performance"):
+            raise ConfigError("performance.profile inválido")
         if (self.tls_certfile is None) != (self.tls_keyfile is None):
             raise ConfigError("server.tls_certfile e server.tls_keyfile devem ser definidos juntos")
         for label, path in (("tls_certfile", self.tls_certfile), ("tls_keyfile", self.tls_keyfile)):
@@ -196,6 +202,7 @@ class Settings:
         mem = raw.get("memory", {})
         recipes = raw.get("recipes", {})
         weather = raw.get("weather", {})
+        performance = raw.get("performance", {})
         models_dir = PROJECT_ROOT / "models" / "openwakeword"
         tts_engine = str(tts.get("engine", "kokoro")).strip().lower()
         tts_default_model = "models/tts/pt_BR-faber-medium.onnx" if tts_engine == "piper" else "models/tts/kokoro-v1.0.onnx"
@@ -205,6 +212,8 @@ class Settings:
             return PROJECT_ROOT / text if text else None
 
         return cls(
+            performance_profile=str(performance.get("profile", "automatic")),
+            performance_path=PROJECT_ROOT / str(performance.get("path", "data/performance.json")),
             bind_host=str(srv.get("bind_host", "127.0.0.1")),
             port=int(srv.get("port", 8800)),
             tls_certfile=optional_path(srv.get("tls_certfile")),

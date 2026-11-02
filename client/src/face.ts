@@ -34,7 +34,7 @@ export class PixelFace {
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly fps = 20,
+    private fps = 20,
   ) {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("Canvas 2D indisponível");
@@ -52,6 +52,10 @@ export class PixelFace {
 
   getMood(): Mood {
     return this.mood;
+  }
+
+  setFps(fps: number): void {
+    this.fps = Math.max(1, Math.min(20, fps));
   }
 
   /** Intensidade 0..1 (nível do microfone ou da fala) usada em "listening"/"speaking". */

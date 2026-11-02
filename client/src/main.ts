@@ -1,4 +1,5 @@
 import { ForecastSettings } from "./forecast.js";
+import { setupPerformance } from "./performance.js";
 import { StageView } from "./stage.js";
 import { ScreenControls } from "./screen.js";
 // Ponto de entrada da interface do quiosque.
@@ -404,6 +405,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
 function main(): void {
   const { panel, face } = setupCommon();
   const { token, fromHash } = resolveToken(location.hash, localStorage.getItem(TOKEN_KEY));
+  setupPerformance(token || "", face);
   if (fromHash && token) {
     localStorage.setItem(TOKEN_KEY, token);
     history.replaceState(null, "", location.pathname + location.search);

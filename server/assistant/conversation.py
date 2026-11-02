@@ -86,6 +86,7 @@ class Conversation:
         self.replies = 0
         self.failures = 0
         self.last_reply_s = 0.0
+        self.last_first_token_s = 0.0
         self.last_error: tuple[str, str] | None = None  # (codigo, mensagem) da ultima falha
 
     @property
@@ -294,6 +295,7 @@ class Conversation:
                 if piece is None:
                     break
                 if not pieces:
+                    self.last_first_token_s = time.perf_counter() - t0
                     await self.machine.set(AssistantState.REPLYING, DETAIL_REPLYING)
                 pieces.append(piece)
                 now = loop.time()
