@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,7 @@ class ConfigError(RuntimeError):
 class Settings:
     bootstrap_managed: bool = False
     performance_profile: str = "automatic"
+    performance_runtime_profile: str = ""
     performance_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "performance.json")
     bind_host: str = "127.0.0.1"
     port: int = 8800
@@ -55,6 +57,9 @@ class Settings:
     # IA local via Ollama, na rede local (sem nuvem, sem chaves). URL e modelo vem de [llm] no TOML.
     llm_enabled: bool = True
     llm_quality_cached_only: bool = False  # runtime-only: bootstrap already validated this configuration
+    llm_manual_probed: bool = False
+    llm_unavailable_reason: str = ""
+    llm_hardware_notice: str = ""
     llm_url: str = "http://127.0.0.1:11434"
     llm_model: str = "qwen2.5:7b"
     llm_auto_model: bool = False  # existing TOML model choices remain manual
@@ -66,6 +71,7 @@ class Settings:
     llm_system_prompt: str = ""  # vazio = instrucao padrao da Luna (server/services/llm.py)
     llm_connect_timeout_s: float = 5.0
     llm_timeout_s: float = 60.0
+    llm_generation_limit_s: float = 600.0
     llm_keep_alive: str = "10m"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 300
@@ -142,8 +148,9 @@ class Settings:
                 raise ConfigError(f"llm.url invalida: {problem}")
             if not self.llm_model.strip():
                 raise ConfigError("llm.model vazio: informe o modelo do Ollama (ex.: qwen2.5:7b)")
-            if self.llm_connect_timeout_s <= 0 or self.llm_timeout_s <= 0:
-                raise ConfigError("llm.connect_timeout_s e llm.timeout_s devem ser maiores que zero")
+            if not all(math.isfinite(value) and value > 0 for value in
+                       (self.llm_connect_timeout_s, self.llm_timeout_s, self.llm_generation_limit_s)):
+                raise ConfigError("Os timeouts de [llm] devem ser finitos e maiores que zero")
             if self.llm_max_tokens <= 0:
                 raise ConfigError("llm.max_tokens deve ser maior que zero")
             if self.llm_num_ctx < 0:
@@ -264,6 +271,7 @@ class Settings:
             llm_system_prompt=str(llm.get("system_prompt", "")).strip(),
             llm_connect_timeout_s=float(llm.get("connect_timeout_s", 5.0)),
             llm_timeout_s=float(llm.get("timeout_s", 60.0)),
+            llm_generation_limit_s=float(llm.get("generation_limit_s", 600.0)),
             llm_keep_alive=str(llm.get("keep_alive", "10m")),
             llm_temperature=float(llm.get("temperature", 0.7)),
             llm_max_tokens=int(llm.get("max_tokens", 300)),
@@ -309,7 +317,11 @@ def load_settings() -> Settings:
 
 
 def apply_automatic_settings(settings: Settings) -> Settings:
-    """Only bootstrap-owned fields still matching the original TOML get an overlay."""
+    """Apply explicit UI preferences and the overlay for bootstrap-owned fields."""
+    from server.services.performance import PerformancePolicy
+    enabled = PerformancePolicy.read_preferences(settings.performance_path).get("llm_enabled")
+    if enabled is not None:
+        settings.llm_enabled = enabled
     if not settings.bootstrap_managed:
         return settings
     path = PROJECT_ROOT / "data/bootstrap-auto.json"

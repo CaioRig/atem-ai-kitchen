@@ -14,6 +14,7 @@ import re
 import socket
 import threading
 import time
+from contextlib import suppress
 from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
@@ -112,6 +113,7 @@ class OllamaClient:
         system_prompt: str = LUNA_SYSTEM_PROMPT,
         connect_timeout_s: float = 5.0,
         timeout_s: float = 60.0,
+        generation_limit_s: float = 600.0,
         keep_alive: str = "10m",
         temperature: float = 0.7,
         max_tokens: int = 300,
@@ -130,6 +132,7 @@ class OllamaClient:
         self.system_prompt = system_prompt or LUNA_SYSTEM_PROMPT
         self.connect_timeout_s = connect_timeout_s
         self.timeout_s = timeout_s
+        self.generation_limit_s = generation_limit_s
         self.keep_alive = keep_alive
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -143,6 +146,8 @@ class OllamaClient:
         self.quality_registry = None
         self.quality_signature = ""
         self.quality_key = ""
+        self.quality_status = ""
+        self._corrupt_replies = 0
         self.approval_error = ""
         self.recovery_notice = ""
         self.backend_identity = {}
@@ -172,7 +177,8 @@ class OllamaClient:
 
     def clone(self, name: str | None = None):
         other = OllamaClient(self.url, name or self.name, system_prompt=self.system_prompt,
-            connect_timeout_s=self.connect_timeout_s, timeout_s=self.timeout_s, keep_alive=self.keep_alive,
+            connect_timeout_s=self.connect_timeout_s, timeout_s=self.timeout_s,
+            generation_limit_s=self.generation_limit_s, keep_alive=self.keep_alive,
             temperature=self.temperature, max_tokens=self.max_tokens, top_p=self.top_p, repeat_penalty=self.repeat_penalty)
         other.num_ctx, other.num_thread = self.num_ctx, self.num_thread
         other.backend_identity = self.backend_identity
@@ -185,8 +191,9 @@ class OllamaClient:
         self._history_at = 0.0
 
     def adopt(self, other) -> None:
-        for field in ("name", "num_ctx", "num_thread", "quality_registry", "quality_signature", "quality_key", "approval_error"):
+        for field in ("name", "num_ctx", "num_thread", "quality_registry", "quality_signature", "quality_key", "quality_status", "approval_error"):
             setattr(self, field, getattr(other, field))
+        self._corrupt_replies = 0
 
     def request_json(self, path: str, body: dict | None = None) -> dict:
         conn = self._connect()
@@ -271,6 +278,12 @@ class OllamaClient:
     def _missing_model_msg(self) -> str:
         return f"O modelo '{self.name}' não está instalado no Ollama. No servidor, execute: ollama pull {self.name}"
 
+    def probe_conversation(self) -> dict:
+        """Generate a short answer with runtime options and isolated history."""
+        probe = self.clone()
+        probe.reply("Olá! Cumprimente-me em uma frase curta, em português.", max_tokens=min(48, self.max_tokens))
+        return probe.last_metrics
+
     def reply(
         self,
         text: str,
@@ -279,16 +292,22 @@ class OllamaClient:
         context: str = "",
         max_tokens: int | None = None,
     ) -> str:
-        from server.services.model_quality import QualityRegistry, local_signature, UNAVAILABLE
+        from server.services.model_quality import LIMITED, QualityRegistry, local_signature, UNAVAILABLE
         if self.approval_error:
             raise LLMError("quality_unavailable", self.approval_error)
         if self.quality_registry and self.quality_signature != local_signature(self):
             if not QualityRegistry(self.quality_registry).approve_or_fallback(self):
                 raise LLMError("quality_unavailable", UNAVAILABLE)
         try:
-            return self._reply_once(text, on_delta, cancel, context, max_tokens)
+            result = self._reply_once(text, on_delta, cancel, context, max_tokens)
+            if result:
+                self._corrupt_replies = 0
+            return result
         except LLMError as exc:
-            if exc.code != "corrupt_response" or not self.quality_registry or (cancel and cancel.is_set()):
+            if exc.code not in ("corrupt_response", "empty", "bad_response") or not self.quality_registry or (cancel and cancel.is_set()):
+                raise
+            self._corrupt_replies += 1
+            if self._corrupt_replies < 2:
                 raise
             registry = QualityRegistry(self.quality_registry)
             registry.invalidate(self, exc.detail)
@@ -299,11 +318,13 @@ class OllamaClient:
             previous = self.name
             self.adopt(alternate)
             self.recovery_notice = f"Falha na geração com {previous}; usando {self.name}, previamente aprovado."
+            if self.quality_status == "limited":
+                self.recovery_notice += f" {LIMITED}"
             try:
                 return self._reply_once(text, on_delta, cancel, context, max_tokens)  # exactly one recovery attempt
             except LLMError as recovery_error:
-                registry.invalidate(self, recovery_error.code)
-                self.approval_error = UNAVAILABLE
+                if recovery_error.code in ("corrupt_response", "empty", "bad_response"):
+                    self._corrupt_replies = 1
                 raise
 
     def _reply_once(self, text, on_delta=None, cancel=None, context="", max_tokens=None) -> str:
@@ -334,6 +355,7 @@ class OllamaClient:
         payload["messages"].append({"role": "user", "content": text})
         if cancel is not None and cancel.is_set():
             return ""
+        self.last_metrics = {}
         conn = self._connect()
         if self.num_ctx:
             payload["options"]["num_ctx"] = self.num_ctx
@@ -341,31 +363,39 @@ class OllamaClient:
             payload["options"]["num_thread"] = self.num_thread
         started = time.perf_counter()
         first_token = None
-        self.last_metrics = {}
         pieces: list[str] = []
         completed = False
+        transport = conn.sock
+        assert transport is not None
+        # The socket timeout tracks inactivity. A separate deadline also bounds
+        # streams that drip bytes forever without finishing an NDJSON record.
+        deadline = started + self.generation_limit_s
+        no_progress_until = started + self.timeout_s
+
+        def interrupt() -> None:
+            with suppress(OSError):
+                transport.shutdown(socket.SHUT_RDWR)
+
+        watchdog = threading.Timer(self.generation_limit_s, interrupt)
+        watchdog.daemon = True
+        watchdog.start()
+        resp = None
         try:
-            try:
-                conn.request(
-                    "POST", "/api/chat", body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                )
-                resp = conn.getresponse()
-            except socket.timeout as exc:
-                raise LLMError("timeout", "A IA demorou demais para responder. Tente de novo.", str(exc)) from exc
-            except (OSError, http.client.HTTPException) as exc:
-                raise LLMError("unreachable", self._unreachable_msg(), f"{type(exc).__name__}: {exc}") from exc
+            conn.request(
+                "POST", "/api/chat", body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            resp = conn.getresponse()
             if resp.status != 200:
                 raise self._http_error(resp.status, resp.read(65536))
             while True:
                 if cancel is not None and cancel.is_set():
                     return ""  # fechar a conexão faz o Ollama interromper a geração
-                try:
-                    line = resp.readline()
-                except socket.timeout as exc:
-                    raise LLMError("timeout", "A IA demorou demais para responder. Tente de novo.", str(exc)) from exc
-                except (OSError, http.client.HTTPException) as exc:
-                    raise LLMError("unreachable", "A conexão com a IA caiu no meio da resposta.", str(exc)) from exc
+                idle_remaining = no_progress_until - time.perf_counter()
+                if idle_remaining <= 0:
+                    raise socket.timeout("sem progresso de geração")
+                transport.settimeout(idle_remaining)
+                line = resp.readline(65536)
                 if not line:
                     break
                 if not line.strip():
@@ -374,12 +404,19 @@ class OllamaClient:
                     obj = json.loads(line)
                 except ValueError as exc:
                     raise LLMError("bad_response", "Resposta inesperada do Ollama.", line[:200].decode("utf-8", "replace")) from exc
+                if not isinstance(obj, dict):
+                    raise LLMError("bad_response", "Resposta inesperada do Ollama.")
                 if obj.get("error"):
                     raise self._http_error(500, str(obj["error"]).encode())
-                piece = (obj.get("message") or {}).get("content") or ""
+                message = obj.get("message", {})
+                if not isinstance(message, dict):
+                    raise LLMError("bad_response", "A IA enviou uma mensagem inválida.")
+                piece = message.get("content", "")
+                if not isinstance(piece, str):
+                    raise LLMError("bad_response", "A IA enviou texto inválido.")
+                if piece or message.get("thinking"):
+                    no_progress_until = time.perf_counter() + self.timeout_s
                 if piece:
-                    if not isinstance(piece, str):
-                        raise LLMError("bad_response", "A IA enviou texto inválido.")
                     problem = response_problem(text, "".join(pieces) + piece, partial=True)
                     if problem:
                         raise LLMError("corrupt_response", CORRUPT, problem)
@@ -388,18 +425,31 @@ class OllamaClient:
                     pieces.append(piece)
                     if on_delta is not None:
                         on_delta(piece)
-                if obj.get("done"):
+                if obj.get("done") is True:
                     completed = True
-                    duration = obj.get("eval_duration", 0) / 1e9
+                    duration = obj.get("eval_duration", 0)
+                    count = obj.get("eval_count", 0)
+                    load = obj.get("load_duration", 0)
                     self.last_metrics = {"ttft_s": first_token, "total_s": time.perf_counter() - started,
-                        "tokens_per_s": obj.get("eval_count", 0) / duration if duration else None,
-                        "load_s": obj.get("load_duration", 0) / 1e9, "model": self.name}
+                        "tokens_per_s": count * 1e9 / duration if isinstance(duration, int) and duration > 0 and isinstance(count, int) else None,
+                        "load_s": load / 1e9 if isinstance(load, int) else None, "model": self.name}
                     break
+        except (LLMError, OSError, http.client.HTTPException) as exc:
+            if time.perf_counter() >= deadline or isinstance(exc, socket.timeout):
+                raise LLMError("timeout", "A IA demorou demais para responder. Tente de novo.") from exc
+            if not isinstance(exc, LLMError):
+                raise LLMError("unreachable", self._unreachable_msg(), type(exc).__name__) from exc
+            raise
         finally:
+            watchdog.cancel()
+            if resp is not None:
+                resp.close()
             conn.close()
         if cancel is not None and cancel.is_set():
             return ""
         if not completed:
+            if time.perf_counter() >= deadline:
+                raise LLMError("timeout", "A IA atingiu o limite de tempo de geração.")
             raise LLMError("incomplete_stream", "A resposta da IA foi interrompida. Tente novamente.")
         reply = clean_reply("".join(pieces))
         if not reply:
@@ -415,9 +465,12 @@ class OllamaClient:
         return reply
 
     def _http_error(self, status: int, body: bytes) -> LLMError:
-        detail = body[:300].decode("utf-8", "replace")
-        if re.search(r"out of memory|not enough (?:system )?memory|requires more (?:system )?memory|insufficient memory|cannot allocate|failed to allocate", detail, re.I):
+        error = body[:65536].decode("utf-8", "replace")
+        detail = error[:300]
+        if re.search(r"out of memory|not enough (?:system )?memory|requires more (?:system )?memory|insufficient memory|cannot allocate|(?:failed|unable) to allocate", error, re.I):
             return LLMError("memory_insufficient", "Memória insuficiente para executar o modelo.", detail)
+        if re.search(r"(?:failed|unable) to load model|invalid (?:model|gguf)|checksum mismatch|corrupt(?:ed)? model", error, re.I):
+            return LLMError("model_load", "O Ollama falhou ao carregar o modelo. Verifique os arquivos do modelo e tente novamente.", detail)
         if status == 400:
             return LLMError("configuration", "O Ollama recusou a configuração do modelo.", detail)
         if status == 404:

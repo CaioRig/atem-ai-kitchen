@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -21,6 +22,7 @@ class FakeOllama:
         self.pieces = ["Olá! ", "Posso ", "ajudar?"]
         self.error: str | None = None  # erro no meio do fluxo
         self.status = 200
+        self.piece_interval = 0.0
         self.requests: list[dict] = []
         self.hold = threading.Event()  # setado: o servidor segura a resposta ate `go` (cancelamento/timeout)
         self.go = threading.Event()
@@ -61,6 +63,8 @@ class FakeOllama:
                     for piece in outer.pieces:
                         if outer.hold.is_set():
                             outer.go.wait(5)
+                        if outer.piece_interval:
+                            time.sleep(outer.piece_interval)
                         self._chunk({"message": {"role": "assistant", "content": piece}, "done": False})
                     if outer.error:
                         self._chunk({"error": outer.error})
@@ -215,6 +219,16 @@ def test_timeout_is_reported(ollama):
         c.reply("oi")
     ollama.go.set()
     assert exc.value.code == "timeout"
+
+
+def test_token_progress_renews_idle_timeout_without_extending_total_limit(ollama):
+    ollama.piece_interval = .16
+    ollama.pieces = ["Bom ", "dia! ", "Posso ", "ajudar?"]
+    assert client(ollama, timeout_s=.4, generation_limit_s=2).reply("Bom dia!") == "Bom dia! Posso ajudar?"
+    deltas = []
+    with pytest.raises(LLMError) as exc:
+        client(ollama, timeout_s=.4, generation_limit_s=.42).reply("Bom dia!", deltas.append)
+    assert exc.value.code == "timeout" and deltas
 
 
 def test_clean_reply_strips_thinking_and_blank_lines():

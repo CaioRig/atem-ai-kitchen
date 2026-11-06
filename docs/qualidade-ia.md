@@ -19,14 +19,33 @@ e perguntas independentes não preservavam o nome informado no turno anterior.
 Essas lacunas foram corrigidas. Não são uma prova da causa específica do episódio
 intermitente de caracteres estrangeiros.
 
-## Aprovação obrigatória
+## Validação na inicialização
 
-`server/services/model_quality.py` executa oito casos: saudação, soma 15+27,
-Brasília, dois turnos com o nome Ana, ovo mexido, resposta exata “azul”, informação
-desconhecida e explicação de geladeira. As verificações são determinísticas, sem
-usar outro LLM como avaliador. Também rejeitam texto manifestamente corrompido.
-Uma recusa natural é válida; uma resposta que só pede pistas sobre uma senha não
-substitui o reconhecimento de que não tem a informação.
+Um modelo escolhido manualmente faz uma geração curta em português com as
+opções de conversa em uso, inclusive em modo offline quando já está instalado.
+O catálogo e a detecção de hardware informam avisos e alternativas. A decisão
+de manter ou trocar o modelo fica com o usuário. Erros de execução aparecem
+no status da IA, enquanto a preferência de habilitação vale nas próximas
+inicializações. Para trocar ou desativar, use **Configurações → Servidor, IA e
+voz**, salve e reinicie o servidor.
+
+A seleção automática usa a suíte v7 para separar compatibilidade, qualidade
+e desempenho. No perfil econômico,
+quatro gerações verificam saudação, identidade, soma simples e uma resposta em
+português. O quinto caso usa o reconhecedor local de música. Os outros perfis
+mantêm os casos adicionais de contexto, receitas, instruções e conversa.
+
+- `approved` indica que o modelo completou a suíte e atendeu aos critérios sem
+  sinais de lentidão.
+- `limited` permite o uso normal quando há evidência de conversa básica, mesmo
+  com erros pontuais ou lentidão. A primeira resposta a partir de 20 s e a
+  geração abaixo de 3 tokens/s sinalizam lentidão.
+- `failed` impede o uso diante de erros críticos de execução ou de qualidade
+  insuficiente para uma conversa básica. O mínimo de qualidade exige respostas
+  coerentes e distintas em pelo menos dois casos, e coerência em pelo menos metade dos casos de LLM
+  executados, com pelo menos um acerto de conversa. Uma conversa bem-sucedida
+  seguida apenas de timeout pode ser usada em modo limitado. Os comandos
+  determinísticos não contam para esse mínimo.
 
 Cada conversa de teste começa vazia, com o mesmo prompt, opções e template do
 modelo usado pela aplicação. O caso de cozinha reutiliza o guia e o limite de
@@ -40,19 +59,25 @@ memória carregada/VRAM informada pelo Ollama quando disponível.
 
 A chave da aprovação inclui digest, versão do Ollama, template e parâmetros do
 modelo, prompt da Luna, opções de inferência, política de receitas e hardware
-local conhecido. Mudanças relevantes exigem nova aprovação. Uma aprovação salva
-só é aceita com evidências completas dos oito casos; HTTP 200 não basta. Sem
-mudanças, a inicialização reutiliza o resultado e não repete a bateria.
+local conhecido. Mudanças relevantes, inclusive a migração para a suíte v7,
+exigem nova validação. Sem mudanças, a inicialização reutiliza a evidência
+salva para `approved` ou `limited` e testa uma geração curta. Uma reavaliação que só encontra timeout
+preserva a validação anterior com a mesma identidade.
 
-Um candidato reprovado não substitui a seleção aprovada. Na inicialização há no
-máximo três candidatos, respeitando a seleção manual e os recursos disponíveis.
-Na conversação, texto manifestamente corrompido não chega ao TTS. Pode haver uma
-única tentativa com uma alternativa que tenha aprovação correspondente, sem nova
-bateria de testes durante essa recuperação. Se não houver alternativa ou ela
-falhar, a IA informa indisponibilidade; não simula uma resposta. Memória, voz,
-transcrição, ferramentas e perfis continuam separados dessa disponibilidade.
+Um candidato automático reprovado não substitui a seleção aprovada. A seleção
+automática tenta no máximo três candidatos e usa estimativas para ordená-los.
+Na conversação, texto manifestamente corrompido é bloqueado antes do TTS.
+Para modelos automáticos, duas falhas de saída consecutivas invalidam a
+aprovação e permitem tentar uma alternativa validada.
+Memória, voz, transcrição, ferramentas e perfis continuam disponíveis.
 
 ## Inferência e contexto
+
+`llm.connect_timeout_s` limita a conexão. `llm.timeout_s` limita a espera pela
+primeira saída e a inatividade durante a geração. No perfil econômico esse
+intervalo é de pelo menos 180 s para acomodar a carga do modelo. Cada trecho
+gerado renova o intervalo de inatividade até o limite total configurável
+`llm.generation_limit_s`, de 600 s por padrão.
 
 Temperatura 0,7 e limites existentes de 300/600 tokens foram preservados. Para
 Qwen 2.5 7B/14B, os valores automáticos são `top_p=0.8` e `repeat_penalty=1.05`;

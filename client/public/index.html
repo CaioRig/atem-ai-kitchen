@@ -132,6 +132,12 @@
       <p>Ajustes visuais salvos neste navegador. Desempenho e voz salvos no servidor.</p>
       <div class="setting-row"><label for="performance-profile">Desempenho do servidor</label><select id="performance-profile"><option value="automatic">Automático</option><option value="economic">Econômico</option><option value="balanced">Equilibrado</option><option value="performance">Desempenho</option></select></div>
       <div class="setting-row"><label for="performance-model">Modelo de IA</label><select id="performance-model"><option value="">Seleção automática</option></select></div>
+      <div class="setting-row"><label for="performance-llm">IA na próxima inicialização</label><select id="performance-llm"><option value="">Configuração do servidor</option><option value="true">Habilitar</option><option value="false">Desativar</option></select></div>
+      <div id="performance-model-actions" class="setting-row hidden">
+        <button id="performance-keep-model" class="pill" type="button">Continuar com este modelo</button>
+        <button id="performance-show-models" class="pill" type="button" aria-controls="performance-recommendations" aria-expanded="false">Ver modelos recomendados</button>
+      </div>
+      <ul id="performance-recommendations" class="hidden"></ul>
       <div class="setting-row"><label for="performance-voice">Voz Kokoro</label><select id="performance-voice"><option value="">Automática (feminina pt-BR)</option><option value="pf_dora">Dora · feminina pt-BR</option><option value="pm_alex">Alex · português</option><option value="pm_santa">Santa · português</option></select></div>
       <p id="performance-hardware" class="muted">Conecte ao servidor para identificar o hardware.</p>
       <div class="setting-row"><button id="performance-save" class="pill" type="button">Salvar desempenho</button><button id="performance-reset" class="pill" type="button">Restaurar automático</button></div>

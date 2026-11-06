@@ -32,6 +32,7 @@ export interface LlmStatus {
   available: boolean;
   reason: string;
   model: string;
+  notice?: string;
 }
 
 export interface TtsStatus {

@@ -17,10 +17,14 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.quality")
 SCHEMA_VERSION = 1
-SUITE_VERSION = 6
+SUITE_VERSION = 7
 _LOCK = threading.RLock()
 UNAVAILABLE = "A IA local não passou na validação de qualidade. Verifique o modelo ou tente novamente após corrigir a configuração."
 CORRUPT = "Houve um problema na geração da resposta. Não vou reproduzir esse texto. Tente novamente."
+LIMITED = "A IA local está disponível em modo limitado. As respostas podem demorar ou ter menor precisão."
+COMMAND_CASES = ("music", "weather", "stop_music")
+RETRYABLE = {"timeout", "unreachable", "server", "incomplete_stream", "bad_response"}
+EXECUTION_FAILURES = RETRYABLE | {"memory_insufficient", "configuration", "model_missing", "model_load"}
 
 
 def normalized(text: str) -> str:
@@ -34,7 +38,7 @@ def response_problem(prompt: str, text: str, *, partial: bool = False) -> str:
         return "" if partial else "empty"
     question, answer = normalized(prompt), normalized(text)
     technical = bool(re.search(r"\b(codigo|code|programa\w*|python|javascript|typescript|sql|html|css|api|json|bash|shell|powershell|script|terminal|unicode|token\w*|template|regex)\b", question))
-    foreign_requested = technical or bool(re.search(r"traduz\w*|traduc\w*|translate|english|russian|japanese|chinese|idioma|ingles|chines|japones|russo|alemao|frances|espanhol", question))
+    foreign_requested = technical or bool(re.search(r"traduz\w*|traduc\w*|translate|english|russian|japanese|chinese|ingles|chines|japones|russo|alemao|frances|espanhol", question))
     letters = [c for c in text if c.isalpha()]
     nonlatin = [c for c in letters if "LATIN" not in unicodedata.name(c, "")]
     prompt_nonlatin = any(c.isalpha() and "LATIN" not in unicodedata.name(c, "") for c in prompt)
@@ -49,16 +53,17 @@ def response_problem(prompt: str, text: str, *, partial: bool = False) -> str:
         if (len(counts) / len(words) < .18 or
                 (triples and max(triples.values()) >= 8 and max(triples.values()) * 3 > len(words) * .45)):
             return "abnormal_repetition"
-    greeting = bool(re.fullmatch(r"(?:oi|ola|bom dia|boa tarde|boa noite)[!?. ,]*(?:luna[!?. ,]*)?", question))
-    if greeting and len(words) > 60:
-        return "greeting_too_long"
-    if greeting and not partial and not re.search(r"\b(oi|ola|bom dia|boa tarde|boa noite)\b|posso ajudar|como posso|tudo bem|seja bem|prazer|bem-vind|como vai", answer):
-        return "greeting_ignored"
-    if not foreign_requested and not prompt_nonlatin and len(words) >= 25:
+    if not foreign_requested and not prompt_nonlatin and len(words) >= 4:
         portuguese = {"o", "de", "do", "da", "e", "em", "um", "uma", "para", "com", "que", "voce", "nao", "por", "os", "as", "se", "no", "na", "ao"}
         english = {"the", "and", "with", "of", "to", "is", "are", "you", "your", "this", "that", "for", "it", "would"}
-        if sum(w in english for w in words) >= 8 and sum(w in portuguese for w in words) <= 1:
+        english_words = sum(w in english for w in words)
+        portuguese_words = sum(w in portuguese for w in words)
+        if english_words >= 3 and english_words >= max(3, 2 * portuguese_words):
             return "unexpected_language"
+    if not technical and not partial and words and not any(c.isdigit() for c in answer):
+        # Catch keyboard noise without imposing a dictionary on names and loanwords.
+        if all(re.search(r"[bcdfghjklmnpqrstvwxyz]{6,}|(.)\1{4,}", word) for word in words):
+            return "not_comprehensible"
     if not partial and not letters and not re.search(r"\d", text):
         return "not_comprehensible"
     return ""
@@ -79,9 +84,11 @@ CASES = (
     ("language", ("Explique em uma frase o que é uma geladeira.",)),
 )
 
-ECONOMIC_CASES = CASES + (
+ECONOMIC_CASES = (
+    ("greeting", ("Bom dia!",)),
+    ("identity", ("Qual é seu nome?",)),
     ("simple_math", ("Quanto é 2 + 2?",)),
-    ("simple_instruction", ("Responda apenas sim.",)),
+    ("basic_language", ("Diga em uma frase como você pode ajudar, em português brasileiro.",)),
     ("music", ("Quero ouvir música.",)),
 )
 
@@ -108,7 +115,7 @@ def command_probe(case: str, question: str) -> str:
 def objective_problem(case: str, reply: str) -> str:
     text = normalized(reply)
     if case == "greeting":
-        valid = len(text.split()) <= 60 and bool(re.search(r"bom dia|ola|\boi\b", text))
+        valid = len(text.split()) <= 60 and bool(re.search(r"\b(oi|ola|bom dia|boa tarde|boa noite)\b|posso ajudar|como posso|tudo bem|seja bem|prazer|bem-vind|como vai", text))
     elif case == "math":
         valid = bool(re.search(r"\b42\b|quarenta e dois", text)) and not (set(re.findall(r"\d+", text)) - {"15", "27", "42"})
     elif case == "math20":
@@ -130,7 +137,10 @@ def objective_problem(case: str, reply: str) -> str:
         valid = bool(re.search(r"\b4\b|\bquatro\b", text)) and not (set(re.findall(r"\d+", text)) - {"2", "4"})
     elif case == "simple_instruction":
         valid = text.strip(".!\"' ") == "sim"
-    elif case in ("music", "weather", "stop_music"):
+    elif case == "basic_language":
+        valid = bool(re.search(r"\b(ajud\w*|auxili\w*|perguntas?|duvidas?|explic\w*|receitas?|informa\w*|sug\w*)\b", text)
+                     and re.search(r"\b(posso|consigo|sei|sou|voce|com|receitas?|perguntas?|duvidas?)\b", text))
+    elif case in COMMAND_CASES:
         valid = text == {"music": "musica", "weather": "weather", "stop_music": "pause_video"}[case]
     elif case == "unknown":
         valid = bool(re.search(r"nao (?:sei|conheco|(?:posso|consigo|tenho como)(?: \w+){0,5}? (?:saber|adivinhar|descobrir|ler)|"
@@ -155,6 +165,34 @@ def local_signature(client) -> str:
                   "options": client.options(), "suite": SUITE_VERSION, "profile": client.quality_profile,
                   "resource_sampler": 2,
                   "recipe_route": recipe_route(client, "Como preparar ovos mexidos?")})
+
+
+def assess(rows: list[dict], expected: int) -> tuple[str, dict, dict, dict]:
+    llm_rows = [row for row in rows if row["route"] == "llm"]
+    coherent = sum(row["coherent"] for row in llm_rows)
+    distinct = {normalized(row["answers"][-1]).strip(".!? ") for row in llm_rows if row["coherent"]}
+    contextual = sum(row["passed"] for row in llm_rows)
+    conversational = any(row["passed"] and row["case"] in
+                         ("greeting", "identity", "conversation", "basic_language", "language", "context")
+                         for row in llm_rows)
+    failures = [row["reason"] for row in llm_rows if row["reason"] in EXECUTION_FAILURES]
+    # A stall after successful generation is a latency limitation. A model that
+    # never completes a useful response, or repeatedly crashes, cannot be used.
+    compatible = coherent > 0 and all(reason == "timeout" for reason in failures)
+    latency_limited = "timeout" in failures and all(row["coherent"] or row["reason"] == "timeout" for row in llm_rows)
+    minimum_met = conversational and (latency_limited or (len(distinct) >= 2 and coherent * 2 >= len(llm_rows)))
+    usable = compatible and minimum_met
+    slow = any((metrics.get("ttft_s") or 0) >= 20 or 0 < (metrics.get("tokens_per_s") or 0) < 3
+               for row in llm_rows for turn in row["turns"] for metrics in (turn["metrics"],))
+    slow |= any(turn.get("reason") == "timeout" for row in llm_rows for turn in row["turns"])
+    complete = len(rows) == expected
+    status = "failed"
+    if usable:
+        status = "approved" if complete and all(row["passed"] for row in rows) and not slow else "limited"
+    return (status, {"passed": compatible, "failures": failures},
+            {"coherent_cases": coherent, "contextual_cases": contextual, "llm_cases": len(llm_rows),
+             "minimum_met": minimum_met},
+            {"slow": slow or "timeout" in failures, "suite_complete": complete})
 
 
 def recipe_route(client, question: str) -> tuple[str, int | None]:
@@ -208,7 +246,7 @@ class QualityRegistry:
                 "ollama_version": version, "signature": local_signature(client), "suite": SUITE_VERSION,
                 "backend": client.backend_identity, "finetune": finetune}
 
-    def ensure(self, client, *, force: bool = False, allow_tests: bool = True) -> dict:
+    def ensure(self, client, *, force: bool = False, allow_tests: bool = True, verify_cached: bool = False) -> dict:
         from server.services.llm import LLMError
         with _LOCK:
             identity = self.metadata(client)
@@ -216,30 +254,34 @@ class QualityRegistry:
             data = self.read()
             cases = quality_cases(client)
             cached = data["reports"].get(key)
-            if isinstance(cached, dict) and isinstance(cached.get("tests"), list) and any(
-                    r.get("reason") in ("timeout", "memory_insufficient", "unreachable", "server", "configuration")
-                    for r in cached["tests"] if isinstance(r, dict)):
-                cached = None  # transient resource/configuration failures are not permanent quality verdicts
-            if not isinstance(cached, dict) or cached.get("identity") != identity or not isinstance(cached.get("approved"), bool):
+            if (not isinstance(cached, dict) or cached.get("identity") != identity
+                    or not isinstance(cached.get("approved"), bool)):
                 cached = None
-            if cached and cached["approved"]:
+            if cached and cached.get("approved") is True:
                 tests = cached.get("tests", [])
-                if (not isinstance(tests, list) or len(tests) != len(cases)
-                        or any(not isinstance(r, dict) or r.get("passed") is not True or not isinstance(r.get("case"), str) for r in tests)
-                        or {r.get("case") for r in tests} != {case for case, _ in cases}):
+                try:
+                    valid = (isinstance(tests, list) and tests
+                             and [row["case"] for row in tests] == [case for case, _ in cases[:len(tests)]]
+                             and cached.get("status") in ("approved", "limited")
+                             and assess(tests, len(cases))[0] == cached["status"])
+                except (AttributeError, IndexError, KeyError, TypeError):
+                    valid = False
+                if not valid:
                     cached = None
-            if cached and not force:
-                if cached["approved"]:
-                    client.approval_error = ""
-                    client.quality_registry = self.path
-                    client.quality_signature = local_signature(client)
-                    client.quality_key = key
-                    if data.get("selected") != {"model": client.name, "key": key}:
-                        data["selected"] = {"model": client.name, "key": key}
-                        self.write(data)
-                return cached
+            if cached and not (force and allow_tests):
+                if cached.get("approved") is True:
+                    if verify_cached:
+                        client.probe_conversation()
+                    self._activate(client, data, key, cached)
+                    return cached
+                elif not isinstance(cached.get("tests"), list) or any(
+                        not isinstance(row, dict) or row.get("reason") in EXECUTION_FAILURES
+                        for row in cached["tests"]):
+                    cached = None  # runtime and infrastructure failures may recover
+                else:
+                    return cached
             if not allow_tests:
-                return {"approved": False, "reason": "no_matching_approval", "model": client.name}
+                return {"status": "failed", "approved": False, "reason": "no_matching_approval", "model": client.name}
             rows = []
             started = time.perf_counter()
             for case, questions in cases:
@@ -250,35 +292,50 @@ class QualityRegistry:
                 turns = []
                 t0 = time.perf_counter()
                 error = ""
+                coherent = False
+                detail = ""
+                command = case in COMMAND_CASES
                 try:
                     for question in questions:
-                        if case in ("music", "weather", "stop_music"):
+                        if command:
                             answer = command_probe(case, question)
                         else:
                             from server.services.model_resources import ResourceSampler
                             context, maximum = recipe_route(probe, question)
                             from server.services.performance import is_local_inference
                             sampler = ResourceSampler(enabled=is_local_inference(probe.address))
-                            try:
-                                with sampler:
-                                    answer = probe.reply(question, context=context, max_tokens=maximum)
-                            finally:
-                                turns.append({"metrics": dict(probe.last_metrics), "resources": sampler.report()})
+                            with sampler:
+                                for attempt in range(2):
+                                    try:
+                                        answer = probe.reply(question, context=context, max_tokens=maximum)
+                                    except LLMError as exc:
+                                        turns.append({"metrics": dict(probe.last_metrics), "reason": exc.code})
+                                        if attempt or exc.code not in RETRYABLE:
+                                            raise
+                                    else:
+                                        turns.append({"metrics": dict(probe.last_metrics), "reason": ""})
+                                        break
+                            problem = response_problem(question, answer)
+                            if problem:
+                                raise LLMError("corrupt_response", CORRUPT, problem)
                         answers.append(answer)
-                        problem = response_problem(question, answer)
-                        if problem:
-                            raise LLMError("corrupt_response", CORRUPT, problem)
+                    coherent = not command
                     error = objective_problem(case, answers[-1])
                 except (LLMError, ValueError) as exc:
                     error = getattr(exc, "code", type(exc).__name__)
-                rows.append({"case": case, "passed": not error, "reason": error, "answers": answers,
-                             "route": "deterministic" if case in ("music", "weather", "stop_music") else "llm",
+                    if isinstance(exc, LLMError) and exc.code == "corrupt_response":
+                        detail = exc.detail
+                finally:
+                    if turns:
+                        turns[-1]["resources"] = sampler.report()
+                rows.append({"case": case, "passed": not error, "reason": error, "detail": detail, "answers": answers,
+                             "coherent": coherent, "route": "deterministic" if command else "llm",
                              "failure_kind": ("latency" if error == "timeout" else "resources" if error == "memory_insufficient"
-                                              else "infrastructure" if error in ("configuration", "model_missing", "unreachable", "server")
+                                              else "infrastructure" if error in EXECUTION_FAILURES
                                               else "quality" if error else ""),
                              "total_s": time.perf_counter() - t0, "metrics": probe.last_metrics, "turns": turns})
-                if error in ("memory_insufficient", "timeout", "configuration", "model_missing", "unreachable", "server"):
-                    break  # further generations cannot fix a resource or configuration failure
+                if error in EXECUTION_FAILURES:
+                    break
             resources = {"ollama_loaded_size_bytes": None, "ollama_size_vram_bytes": None}
             try:
                 running = client.request_json("/api/ps").get("models", [])
@@ -286,23 +343,43 @@ class QualityRegistry:
                 resources.update(ollama_loaded_size_bytes=current.get("size"), ollama_size_vram_bytes=current.get("size_vram"))
             except (RuntimeError, ValueError, OSError):
                 pass
-            report = {"model": client.name, "profile": client.quality_profile,
-                      "approved": len(rows) == len(cases) and all(r["passed"] for r in rows), "identity": identity,
+            status, compatibility, quality, performance = assess(rows, len(cases))
+            report = {"model": client.name, "profile": client.quality_profile, "status": status,
+                      "approved": status != "failed", "identity": identity,
+                      "compatibility": compatibility, "quality": quality, "performance": performance,
                       "tests": rows, "total_s": time.perf_counter() - started, "checked_at": time.time()}
             report["resources"] = resources
             report["pass_rate"] = sum(r["passed"] for r in rows) / len(cases)
             report["measurement_notes"] = "TTFT/load/tokens por segundo via stream Ollama; turns contém pico RSS amostrado dos processos Ollama e CPU local. /api/ps é snapshot. GPU indisponível=null."
+            if (cached and cached.get("approved") and not report["approved"] and rows
+                    and all(row["route"] != "llm" or row["coherent"] or row["reason"] == "timeout" for row in rows)
+                    and compatibility["failures"] == ["timeout"]):
+                data["last_latency_check"] = report
+                report = cached  # a slow recheck does not supersede existing compatibility evidence
+                if verify_cached:
+                    self.write(data)
+                    client.probe_conversation()
             data["reports"][key] = report
             if report["approved"]:
-                data["last_good"] = [client.name] + [n for n in data["last_good"] if n != client.name][:4]
-                data["selected"] = {"model": client.name, "key": key}
-                client.approval_error = ""
-                client.quality_registry, client.quality_key = self.path, key
-                client.quality_signature = local_signature(client)
+                self._activate(client, data, key, report, persist=False)
+            elif data.get("selected", {}).get("key") == key:
+                data.pop("selected")
             self.write(data)
-            log.info("qualidade: modelo=%s perfil=%s aprovado=%s testes=%d/%d", client.name, client.quality_profile,
-                     report["approved"], sum(r["passed"] for r in rows), len(cases))
+            log.info("qualidade: modelo=%s perfil=%s status=%s testes=%d/%d", client.name, client.quality_profile,
+                     report["status"], sum(r["passed"] for r in rows), len(cases))
             return report
+
+    def _activate(self, client, data, key, report, *, persist=True) -> None:
+        client.approval_error = ""
+        client.quality_registry, client.quality_key = self.path, key
+        client.quality_signature = local_signature(client)
+        client.quality_status = report["status"]
+        selection = {"model": client.name, "key": key}
+        if data.get("selected") != selection or not persist:
+            data["selected"] = selection
+            data["last_good"] = [client.name] + [n for n in data["last_good"] if n != client.name][:4]
+            if persist:
+                self.write(data)
 
     def approve_or_fallback(self, client, alternatives=(), *, force=False, allow_new=True, compatible_names=None, cached_only=False) -> bool:
         original = client.name
@@ -339,6 +416,7 @@ class QualityRegistry:
             report = data["reports"].get(client.quality_key)
             if report:
                 report["approved"] = False
+                report["status"] = "failed"
                 report["runtime_failure"] = reason
                 if data.get("selected", {}).get("key") == client.quality_key:
                     data.pop("selected", None)
@@ -363,6 +441,7 @@ def configured_client(settings, hardware=None):
     from server.services.performance import PerformancePolicy, hardware_key
     client = OllamaClient(settings.llm_url, settings.llm_model, system_prompt=settings.llm_system_prompt,
         connect_timeout_s=settings.llm_connect_timeout_s, timeout_s=settings.llm_timeout_s,
+        generation_limit_s=settings.llm_generation_limit_s,
         keep_alive=settings.llm_keep_alive, temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens, top_p=settings.llm_top_p, repeat_penalty=settings.llm_repeat_penalty)
     policy = PerformancePolicy(settings, hardware)

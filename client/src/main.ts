@@ -262,6 +262,7 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
           wake = msg.wake ?? { available: false, reason: "servidor sem detecção" };
           transcription = msg.transcription ?? { available: false, reason: "servidor sem transcrição" };
           llm = msg.llm ?? { available: false, reason: "servidor sem IA" };
+          if (msg.llm?.notice) screenControls.execute("notice", msg.llm.notice);
           tts = msg.tts ?? { available: false, reason: "servidor sem voz" };
           memory = msg.memory ?? { available: false, reason: "servidor sem memória", count: 0 };
           if (!transcription.available) console.warn("transcrição indisponível:", transcription.reason);

@@ -14,10 +14,11 @@ from server.services.model_quality import QualityRegistry, response_problem, obj
     ("Bom dia", "Olá \ufffd", "invalid_unicode"),
     ("Bom dia", "中文日本語日本語中文随机字符случайныйтекст", "unexpected_scripts"),
     ("Bom dia", "Bom dia " * 35, "abnormal_repetition"),
-    ("Bom dia", "Bom dia. " + " ".join(f"palavra{i}" for i in range(65)), "greeting_too_long"),
     ("Bom dia", "```python\nprint('oi')\n```", "unexpected_code_or_tokens"),
     ("Bom dia", "<|im_start|>assistant", "unexpected_code_or_tokens"),
     ("teste", "!!!??", "not_comprehensible"),
+    ("Bom dia", "asdkfjlkj qwrtypsdf", "not_comprehensible"),
+    ("Como você pode ajudar em português?", "I can help you with your questions.", "unexpected_language"),
 ])
 def test_obvious_corruption_is_rejected(prompt, answer, reason):
     assert response_problem(prompt, answer) == reason
@@ -31,6 +32,7 @@ def test_obvious_corruption_is_rejected(prompt, answer, reason):
     ("Explique esta API em JSON", '{"message": "Hello World"}'),
     ("Como preparo uma receita detalhada?", "Misture os ingredientes com cuidado e cozinhe em fogo baixo. " * 5),
     ("oi", "Claro! Posso ajudar."),
+    ("Bom dia!", "Hoje estou à disposição para conversar."),
 ])
 def test_legitimate_foreign_code_and_long_requests_are_preserved(prompt, answer):
     assert response_problem(prompt, answer) == ""
@@ -67,6 +69,8 @@ ANSWERS = {
     "Responda apenas com a palavra azul.": "azul",
     "Qual é a senha que estou pensando?": "Não tenho como saber sua senha.",
     "Explique em uma frase o que é uma geladeira.": "A geladeira conserva alimentos em baixa temperatura.",
+    "Quanto é 2 + 2?": "São quatro.",
+    "Diga em uma frase como você pode ajudar, em português brasileiro.": "Posso ajudar com receitas e responder a suas perguntas.",
 }
 
 
@@ -91,6 +95,9 @@ class TestModel(OllamaClient):
         other.num_ctx, other.num_thread = self.num_ctx, self.num_thread
         other.system_prompt = self.system_prompt
         other.temperature = self.temperature
+        other.max_tokens = self.max_tokens
+        other.timeout_s = self.timeout_s
+        other.generation_limit_s = self.generation_limit_s
         other.backend_identity = self.backend_identity
         other.recipe_policy = self.recipe_policy
         other.quality_profile = self.quality_profile
@@ -113,21 +120,18 @@ def environment():
     return {"models": {"good:7b": {}, "candidate:3b": {}}, "calls": []}
 
 
-def test_economic_suite_checks_basic_chat_and_real_command_routes(tmp_path, monkeypatch):
-    monkeypatch.setitem(ANSWERS, "Qual é seu nome?", "Meu nome é Luna.")
-    monkeypatch.setitem(ANSWERS, "Quanto é 2 + 2?", "4")
-    monkeypatch.setitem(ANSWERS, "Responda apenas sim.", "sim")
+def test_economic_suite_checks_basic_chat_and_real_command_routes(tmp_path):
     env = environment()
     client = TestModel(env)
     client.configure_economic()
     registry = QualityRegistry(tmp_path / "quality.json")
     report = registry.ensure(client)
-    assert report["approved"] and report["profile"] == "economic"
-    assert len(report["tests"]) == 15 and len(env["calls"]) == 13
-    assert sum(r["route"] == "deterministic" for r in report["tests"]) == 3
-    assert registry.ensure(client)["approved"] and len(env["calls"]) == 13
+    assert report["status"] == "approved" and report["profile"] == "economic"
+    assert len(report["tests"]) == 5 and len(env["calls"]) == 4
+    assert sum(r["route"] == "deterministic" for r in report["tests"]) == 1
+    assert registry.ensure(client)["approved"] and len(env["calls"]) == 4
     client.quality_profile = "standard"
-    assert registry.ensure(client)["approved"] and len(env["calls"]) == 24
+    assert registry.ensure(client)["approved"] and len(env["calls"]) == 15
 
 
 @pytest.mark.parametrize("case,reply", [("identity", "Sou Qwen"), ("simple_math", "5"),
@@ -157,8 +161,9 @@ def test_cache_uses_all_eight_cases_and_revalidates_real_changes(tmp_path):
     assert len(env["calls"]) == 44
 
 
-@pytest.mark.parametrize("reason", ["memory_insufficient", "timeout", "configuration"])
-def test_resource_failures_stop_early_and_can_recover_after_restart(tmp_path, monkeypatch, reason):
+@pytest.mark.parametrize("reason,attempt_count", [("memory_insufficient", 1), ("timeout", 2),
+                                                  ("configuration", 1), ("server", 2)])
+def test_resource_failures_stop_early_and_can_recover_after_restart(tmp_path, monkeypatch, reason, attempt_count):
     env = environment()
     client = TestModel(env)
     registry = QualityRegistry(tmp_path / "quality.json")
@@ -169,11 +174,12 @@ def test_resource_failures_stop_early_and_can_recover_after_restart(tmp_path, mo
         raise LLMError(reason, "falha simulada")
     monkeypatch.setattr(TestModel, "_reply_once", fail)
     rejected = registry.ensure(client)
-    assert not rejected["approved"]
-    assert len(attempts) == len(rejected["tests"]) == 1
+    assert rejected["status"] == "failed" and not rejected["approved"]
+    assert len(attempts) == attempt_count and len(rejected["tests"]) == 1
     assert rejected["tests"][0]["reason"] == reason
     assert rejected["tests"][0]["failure_kind"] == {
-        "timeout": "latency", "memory_insufficient": "resources", "configuration": "infrastructure"}[reason]
+        "timeout": "latency", "memory_insufficient": "resources",
+        "configuration": "infrastructure", "server": "infrastructure"}[reason]
     monkeypatch.setattr(TestModel, "_reply_once", original)
     assert registry.ensure(client)["approved"]
     assert len(env["calls"]) == 11
@@ -206,9 +212,12 @@ def test_runtime_recovers_once_using_a_matching_previously_approved_model(tmp_pa
     registry.ensure(candidate)
     before = len(env["calls"])
     env["models"]["candidate:3b"]["bad"] = "随机字符中文日本語日本語русскийтекст"
+    with pytest.raises(LLMError, match="problema"):
+        candidate.reply("Bom dia!")
+    assert candidate.name == "candidate:3b" and registry.read()["selected"]["model"] == "candidate:3b"
     assert candidate.reply("Bom dia!") == ANSWERS["Bom dia!"]
     assert candidate.name == "good:7b"
-    assert len(env["calls"]) == before + 2  # no suite during recovery
+    assert len(env["calls"]) == before + 3  # no suite during recovery
     assert registry.read()["selected"]["model"] == "good:7b"
 
 
@@ -227,6 +236,8 @@ def test_no_approved_recovery_is_explicit_and_not_retried_in_a_loop(tmp_path):
     candidate = TestModel(env)
     registry.ensure(candidate)
     env["models"]["good:7b"]["bad"] = "随机字符中文日本語日本語русскийтекст"
+    with pytest.raises(LLMError, match="problema"):
+        candidate.reply("Bom dia!")
     with pytest.raises(LLMError, match="problema"):
         candidate.reply("Bom dia!")
     count = len(env["calls"])
@@ -260,6 +271,81 @@ def test_cache_needs_complete_test_evidence_not_just_an_approval_flag(tmp_path):
     registry.write(data)
     assert registry.ensure(client)["approved"]
     assert len(env["calls"]) == 22
+
+
+def test_economic_slow_response_is_limited_and_offline_cache_is_usable(tmp_path, monkeypatch):
+    original = TestModel._reply_once
+
+    def slow(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        self.last_metrics = {"ttft_s": 45, "tokens_per_s": 2, "load_s": 36}
+        return result
+
+    monkeypatch.setattr(TestModel, "_reply_once", slow)
+    env = environment()
+    client = TestModel(env)
+    client.configure_economic()
+    registry = QualityRegistry(tmp_path / "quality.json")
+    report = registry.ensure(client)
+    assert report["approved"] and report["status"] == "limited" and report["pass_rate"] == 1
+    assert report["compatibility"]["passed"] and report["performance"]["slow"]
+    restarted = TestModel(env)
+    restarted.configure_economic()
+    assert registry.approve_or_fallback(restarted, cached_only=True)
+    assert restarted.quality_status == "limited" and len(env["calls"]) == 4
+
+
+def test_completed_conversation_before_timeout_is_usable(tmp_path, monkeypatch):
+    env = environment()
+    client = TestModel(env)
+    client.configure_economic()
+    reply = TestModel._reply_once
+
+    def stall_after_greeting(self, text, *args, **kwargs):
+        if text != "Bom dia!":
+            raise LLMError("timeout", "Geração lenta")
+        return reply(self, text, *args, **kwargs)
+
+    monkeypatch.setattr(TestModel, "_reply_once", stall_after_greeting)
+    report = QualityRegistry(tmp_path / "quality.json").ensure(client)
+    assert report["approved"] and report["status"] == "limited"
+    assert report["compatibility"]["failures"] == ["timeout"]
+
+
+def test_force_timeout_keeps_previously_usable_report(tmp_path, monkeypatch):
+    env = environment()
+    client = TestModel(env)
+    registry = QualityRegistry(tmp_path / "quality.json")
+    original = registry.ensure(client)
+
+    def timeout(*args, **kwargs):
+        raise LLMError("timeout", "falha simulada")
+
+    monkeypatch.setattr(TestModel, "_reply_once", timeout)
+    assert registry.ensure(client, force=True) == original
+    assert registry.read()["last_latency_check"]["compatibility"]["failures"] == ["timeout"]
+    assert registry.ensure(client, allow_tests=False)["approved"]
+
+
+def test_deterministic_commands_cannot_approve_corrupt_model(tmp_path):
+    env = environment()
+    env["models"]["good:7b"]["bad"] = "asdfghjkl"
+    client = TestModel(env)
+    client.configure_economic()
+    report = QualityRegistry(tmp_path / "quality.json").ensure(client)
+    assert report["status"] == "failed" and not report["compatibility"]["passed"]
+    assert report["quality"]["coherent_cases"] == 0
+    assert report["tests"][-1]["passed"] and report["tests"][-1]["route"] == "deterministic"
+
+
+def test_repeating_one_answer_to_every_prompt_cannot_validate_conversation(tmp_path):
+    env = environment()
+    env["models"]["good:7b"]["bad"] = "Sou a Luna."
+    client = TestModel(env)
+    client.configure_economic()
+    report = QualityRegistry(tmp_path / "quality.json").ensure(client)
+    assert report["status"] == "failed" and report["compatibility"]["passed"]
+    assert report["quality"]["contextual_cases"] == 1 and not report["quality"]["minimum_met"]
 
 
 def test_cached_only_startup_never_runs_new_suite_and_rejected_is_not_fallback(tmp_path):

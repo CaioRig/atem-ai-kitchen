@@ -75,14 +75,14 @@ No perfil econômico com Whisper base e Kokoro int8, o orçamento inicial estima
 é de 2,5 GiB livres para 1,5B ou 1,75 GiB para 0,5B, incluindo serviços e margem
 do sistema. RAM já ocupada pelo SO não é descontada duas vezes. Modelos de voz
 manuais e contexto maior ajustam o orçamento; esses valores não são requisitos oficiais.
-Se nem o menor couber, os logs mostram a RAM livre e a IA permanece desativada.
+Se nenhum candidato atender à estimativa, o modo automático avisa e tenta um
+modelo leve, dando preferência a um candidato já instalado.
 O perfil econômico usa contexto de 2.048 tokens (salvo preferência explícita),
-até 128 tokens por resposta comum e timeout de geração de pelo menos 180 s.
+até 128 tokens por resposta comum e pelo menos 180 s de tolerância a inatividade,
+sujeitos a `llm.generation_limit_s`.
 O Ollama descarrega o modelo após a resposta para liberar RAM antes da síntese
-de voz; isso pode aumentar a latência. A suíte econômica v6 valida os mesmos
-cenários básicos de conversa do perfil padrão, mais 2 + 2 e instrução sim;
-música, clima e parada
-são verificados pelos reconhecedores reais de comandos, sem inventar dados.
+de voz, o que pode aumentar a latência. Música, clima e parada têm reconhecedores
+de comandos próprios.
 O pedido de música abre a pesquisa de vídeos existente: a seleção/reprodução
 no YouTube depende da interação do usuário e de internet. Pausar/continuar usa
 o player integrado quando disponível, sem depender do LLM.
@@ -90,7 +90,8 @@ Mudanças de perfil ou da suíte exigem nova aprovação; depois ela pode ser re
 Metadados consultados nas [páginas oficiais Ollama](https://ollama.com/library/qwen2.5)
 e no [repositório Qwen](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct).
 
-A seleção preserva escolhas manuais e o último modelo aprovado ainda compatível.
+A seleção preserva escolhas manuais. Em modo automático, prioriza o último
+modelo aprovado que atende à estimativa.
 Depois prefere candidatos conhecidos já instalados, priorizando qualidade dentro
 dos recursos livres. Não troca modelos somente por velocidade. Quando necessário,
 confirma a tag no registro oficial, verifica espaço e baixa um candidato pela
@@ -98,15 +99,25 @@ API `/api/pull`, exibindo progresso. Interrompeu? Execute novamente para retomar
 Instalação é confirmada por `/api/tags` e `/api/show`; aliases conhecidos evitam
 downloads redundantes. Nunca são apagados modelos do usuário.
 
-Cada novo candidato passa pela suíte pt-BR v6: os dez cenários de conversa/comandos
-solicitados, mais capital e descrição de geladeira; o perfil econômico acrescenta
-2+2, apenas sim e intenção de música. Comandos testam os reconhecedores reais sem
-executar ações. Template, digest, versão do Ollama, hardware e parâmetros
-fazem parte da identidade da aprovação. Reprovação permite até três candidatos
-compatíveis no modo automático; o último aprovado e as preferências permanecem.
-HTTP 200 sozinho não aprova nada. Consulte `data/model-quality.json` e
-`data/bootstrap-state.json`; o servidor reutiliza a aprovação sem repetir a suíte.
-Esses testes detectam falhas evidentes, sem garantir acerto universal.
+No perfil econômico, a suíte pt-BR v7 verifica saudação, identidade, soma simples,
+português e o reconhecedor real de música. Os outros perfis mantêm a bateria
+mais ampla. `approved` e `limited` habilitam a IA. Um modelo fica em `limited`
+quando oferece conversa básica, mas é lento ou tem limitações observadas nos testes.
+`failed` impede o uso quando a execução ou a conversa básica falha.
+
+O modelo manual passa por uma conversa curta em português com as opções de
+inferência em uso. Se os recursos estiverem abaixo da recomendação, o Ollama
+ainda tenta a carga. Em **Configurações → Servidor, IA e voz**, você pode manter
+o modelo, selecionar uma alternativa mais leve ou desativar a IA. Confirme
+alterações em **Salvar desempenho** e reinicie o servidor para aplicá-las.
+Em caso de falha, a preferência de habilitação fica salva e o motivo aparece
+na interface e nos logs. Ajuste `llm.timeout_s` e `llm.generation_limit_s` para
+dar mais tempo à geração.
+
+O modo automático tenta até três candidatos. Quando há validação salva para
+a mesma identidade, basta uma conversa curta para verificar a execução nesta
+inicialização. Consulte `data/model-quality.json` e `data/bootstrap-state.json`
+para ver os resultados de qualidade e o estado operacional.
 
 Para acrescentar modelos, copie um registro completo do JSON, consulte fontes
 oficiais, mantenha tags/aliases únicos, explicite estimativas, confira licença e

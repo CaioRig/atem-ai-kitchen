@@ -38,9 +38,9 @@ from server.assistant.speech import Speech
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
 from server.assistant.weather import WeatherAssistant
-from server.services.llm import LanguageModel, OllamaClient
+from server.services.llm import LLMError, LanguageModel, OllamaClient
 from server.services.performance import GIB, PerformancePolicy, gpu_utilization
-from server.services.model_quality import QualityRegistry
+from server.services.model_quality import LIMITED, QualityRegistry
 from server.services.transcriber import Transcriber, TranscriberUnavailable, WhisperCppTranscriber
 from server.services.tts import KokoroSynthesizer, PiperSynthesizer, Synthesizer, TtsUnavailable
 from server.services.vad import SileroVad, SpeechDetector, VadUnavailable
@@ -151,12 +151,16 @@ def load_llm(settings: Settings) -> LanguageModel | None:
     if not settings.llm_enabled:
         log.info("IA local desativada (llm.enabled = false)")
         return None
+    if settings.llm_unavailable_reason:
+        log.warning("IA indisponível nesta execução: %s", settings.llm_unavailable_reason)
+        return None
     client = OllamaClient(
         settings.llm_url,
         settings.llm_model,
         system_prompt=settings.llm_system_prompt,
         connect_timeout_s=settings.llm_connect_timeout_s,
         timeout_s=settings.llm_timeout_s,
+        generation_limit_s=settings.llm_generation_limit_s,
         keep_alive=settings.llm_keep_alive,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
@@ -320,7 +324,9 @@ def create_app(
         await hub.broadcast(event)
 
     async def on_reply_error(code: str, message: str) -> None:
-        llm_status["reason"] = message
+        if (not isinstance(llm, OllamaClient) or llm.approval_error
+                or code in ("model_missing", "unreachable", "memory_insufficient", "model_load", "server")):
+            llm_status["reason"] = message
         await hub.broadcast({"type": "reply_error", "code": code, "message": message, "retry": True})
 
     async def on_memory(event: dict) -> None:
@@ -428,9 +434,18 @@ def create_app(
         }
 
     def llm_info() -> dict:
+        info = {"enabled": settings.llm_enabled, "notice": settings.llm_hardware_notice}
         if llm is None:
-            return {"available": False, "reason": "IA local desativada (llm.enabled = false)", "model": ""}
-        return {"available": not llm_status["reason"], "reason": llm_status["reason"], "model": llm.name}
+            return {**info, "available": False,
+                    "reason": settings.llm_unavailable_reason if settings.llm_enabled else "IA local desativada (llm.enabled = false)",
+                    "model": (performance.manual_model or settings.llm_model) if settings.llm_enabled else ""}
+        reason = llm_status["reason"]
+        if isinstance(llm, OllamaClient):
+            reason = llm.approval_error or reason
+        info.update(available=not reason, reason=reason, model=llm.name)
+        if isinstance(llm, OllamaClient):
+            info["status"] = "failed" if reason else llm.quality_status
+        return info
 
     def tts_info() -> dict:
         return {
@@ -518,6 +533,27 @@ def create_app(
     async def lifespan(_: FastAPI):
         if isinstance(llm, OllamaClient):
             await asyncio.to_thread(performance.configure_llm, llm)
+            if settings.llm_hardware_notice:
+                log.warning("%s Modelo=%s; contexto=%s.", settings.llm_hardware_notice, llm.name, performance.context)
+        if isinstance(llm, OllamaClient) and (settings.llm_manual_probed or (
+                performance.manual_model and not settings.llm_quality_cached_only)):
+            reason = ""
+            try:
+                if not settings.llm_manual_probed:
+                    if not any(m.get("name") in (llm.name, llm.name + ":latest") for m in performance.models):
+                        reason = await asyncio.to_thread(llm.check)
+                    if not reason:
+                        await asyncio.to_thread(llm.probe_conversation)
+            except LLMError as exc:
+                reason = f"{exc.message} ({exc.code})"
+            if reason:
+                llm.approval_error = f"{reason} Reinicie após corrigir ou selecione outro modelo nas configurações."
+                llm_status["reason"] = llm.approval_error
+                log.warning("IA indisponível: modelo manual %s; %s", llm.name, llm.approval_error)
+            else:
+                llm.quality_status = "ready"
+            settings.llm_model = llm.name
+        elif isinstance(llm, OllamaClient):
             registry = QualityRegistry(settings.llm_quality_path)
             hardware = performance.hardware
             budget = max(max(0, (hardware.ram_available or 0) - 2 * GIB) * .65,
@@ -535,6 +571,8 @@ def create_app(
                 llm_status["reason"] = llm.approval_error
             else:
                 settings.llm_model = llm.name
+                if llm.quality_status == "limited":
+                    performance.notices.append(LIMITED)
                 if llm.recovery_notice:
                     performance.notices.append(llm.recovery_notice)
                 await asyncio.to_thread(performance.save)
@@ -578,7 +616,14 @@ def create_app(
     @app.get("/api/performance")
     async def performance_info(request: Request) -> JSONResponse:
         authorize(request)
+        if llm is None:
+            try:
+                inventory = OllamaClient(settings.llm_url, settings.llm_model, connect_timeout_s=settings.llm_connect_timeout_s)
+                performance.models = await asyncio.to_thread(inventory.list_models)
+            except (OSError, ValueError, RuntimeError):
+                pass
         snapshot = performance.snapshot()
+        snapshot["llm"] = llm_info()
         snapshot["resources"]["gpu_utilization_percent"] = await asyncio.to_thread(gpu_utilization)
         return JSONResponse({**snapshot, "latency": {
             "detection_ms_per_frame": pipeline.detect_ms,
@@ -594,14 +639,19 @@ def create_app(
             raise HTTPException(413, "Preferências muito grandes")
         try:
             preferences = performance.validate(await request.json())
-            if preferences["model"] and preferences["model"] not in [m.get("name") for m in performance.models]:
-                raise ValueError("Selecione um modelo instalado no Ollama")
+            allowed = {m.get("name") for m in performance.models}
+            allowed.update(m["name"] for m in performance.recommended_models())
+            allowed.add(performance.manual_model)
+            if preferences["model"] and preferences["model"] not in allowed:
+                raise ValueError("Selecione um modelo instalado ou recomendado")
+            if "llm_enabled" in performance.preferences:
+                preferences.setdefault("llm_enabled", performance.preferences["llm_enabled"])
             await asyncio.to_thread(performance.save, preferences)
         except (ValueError, TypeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         except OSError as exc:
             raise HTTPException(503, "Não foi possível salvar as preferências") from exc
-        return JSONResponse(performance.snapshot())
+        return JSONResponse({**performance.snapshot(), "llm": llm_info()})
 
     @app.get("/health")
     async def health() -> JSONResponse:

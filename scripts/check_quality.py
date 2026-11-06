@@ -1,4 +1,4 @@
-"""Run the eight real Portuguese checks against the configured local/LAN Ollama."""
+"""Run the Portuguese checks for the configured profile against the local/LAN Ollama."""
 from __future__ import annotations
 
 import argparse
@@ -121,7 +121,7 @@ def main(argv=None) -> int:
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"IA não aprovada: {type(exc).__name__}")
         return 1
-    print(f"Modelo: {client.name}; aprovado: {report['approved']}; opções: {json.dumps(client.options())}")
+    print(f"Modelo: {client.name}; estado: {report['status']}; opções: {json.dumps(client.options())}")
     for test in report["tests"]:
         print(f"{test['case']}: {'OK' if test['passed'] else test['reason']} ({test['total_s']:.3f} s)")
         if args.show_answers:

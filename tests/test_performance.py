@@ -139,3 +139,32 @@ def test_settings_api_requires_auth_and_saves_for_restart(tmp_path, monkeypatch)
         assert response.json()["preferences"]["profile"] == "economic"
     assert policy(tmp_path).profile == "performance"  # unrelated preferences file stays independent
     assert PerformancePolicy(s).profile == "economic"
+
+
+def test_recommended_model_and_explicit_enablement_persist_for_restart(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import server.api.app as module
+    from server.storage.config import apply_automatic_settings
+
+    monkeypatch.setattr(module, "load_detector", lambda s: (None, "unavailable"))
+    monkeypatch.setattr(module, "load_transcriber", lambda s: (None, "unavailable"))
+    monkeypatch.setattr(module, "load_vad", lambda s: None)
+    monkeypatch.setattr(module, "gpu_utilization", lambda: None)
+    monkeypatch.setattr(module.OllamaClient, "list_models", lambda self: [{"name": "qwen2.5:0.5b"}])
+    settings = Settings(auth_token="a-long-test-token", performance_path=tmp_path / "prefs.json",
+                        llm_unavailable_reason="Ollama indisponível", tts_enabled=False, memory_enabled=False,
+                        weather_enabled=False)
+    with TestClient(module.create_app(settings)) as client:
+        headers = {"Authorization": "Bearer a-long-test-token"}
+        info = client.get("/api/performance", headers=headers).json()
+        assert info["llm"]["enabled"] and not info["llm"]["available"]
+        assert info["llm"]["reason"] == "Ollama indisponível"
+        lighter = next(entry for entry in info["recommendations"] if entry["name"] == "qwen2.5:0.5b")
+        assert lighter["installed"] and lighter["size_bytes"] > 0 and lighter["ram_gib"] > 0
+        update = client.put("/api/performance", headers=headers,
+                            json={"model": lighter["name"], "llm_enabled": False})
+        assert update.status_code == 200
+        assert update.json()["llm"]["enabled"] and update.json()["restart_required"]
+    restarted = apply_automatic_settings(Settings(performance_path=settings.performance_path))
+    assert not restarted.llm_enabled
+    assert PerformancePolicy(restarted).manual_model == "qwen2.5:0.5b"

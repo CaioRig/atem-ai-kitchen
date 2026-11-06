@@ -27,6 +27,8 @@ mono, 16 kHz, em quadros de qualquer tamanho (o cliente envia 1280 amostras =
    significa que a fala é capturada mas não transcrita (`pywhispercpp` ou modelo ggml ausente).
    `llm.available = false` significa que a IA local não respondeu na última verificação ou está
    desativada (`reason` explica); a transcrição continua funcionando (`docs/ia-local.md`).
+   `llm.enabled` informa a preferência aplicada nesta execução. `llm.notice` informa
+   um aviso de desempenho que pode aparecer mesmo com a IA disponível.
    `memory: {available, reason, count}` descreve a memória persistente (`docs/memoria.md`);
    `available = false` significa que o arquivo SQLite não abriu ou `[memory] enabled = false`.
    `weather: {enabled, available, location, summary, detail, updated_at, stale, status, message, source, attribution, …}`

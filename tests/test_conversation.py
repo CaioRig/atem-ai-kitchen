@@ -302,7 +302,7 @@ def test_reply_is_broadcast_over_websocket(tmp_path):
     llm = FakeLLM(pieces=["São ", "dez horas."])
     with ws_client(tmp_path, llm) as c, c.websocket_connect("/ws") as ws:
         w = hello(ws)
-        assert w["llm"] == {"available": True, "reason": "", "model": "fake-llm"}
+        assert w["llm"] == {"available": True, "enabled": True, "reason": "", "model": "fake-llm", "notice": ""}
         ws.send_bytes(wake_frame() + speech(6))
         ws.send_bytes(silence(20))
         msgs = []

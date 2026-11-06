@@ -264,3 +264,94 @@ diagnóstico desse caso para não atribuir falta de aprovação a falta de memó
 O inventário de processos Windows foi executado; Linux possui implementação, mas
 não foi validado nativamente. Nenhuma instalação de dependências, remoção de modelos,
 edição de TOML/credenciais/bancos, push ou deploy.
+
+## Correção solicitada — validação flexível em hardware limitado (2026-11-06)
+
+Correção validada no escopo solicitado. Os registros da suíte v6 mostravam
+Qwen2.5 1,5B com saídas barradas pelo filtro, Gemma 3 1B com 9/15 casos e
+Qwen2.5 0,5B com erro do Ollama na primeira geração. A regra de 100% dos casos
+eliminava modelos funcionais, e o orçamento estimado impedia algumas tentativas
+antes da carga real.
+
+A suíte v7 separa compatibilidade, qualidade e desempenho. O perfil econômico
+faz quatro gerações básicas e consulta o reconhecedor local de música.
+`approved` e `limited` permitem uso e retomada offline com a identidade
+correspondente. O modo limitado informa lentidão ou acertos parciais. Abaixo
+da estimativa, há tentativa econômica para modelos de até 1,6B e contexto
+de até 2.048 tokens se couberem os pesos e a reserva de serviços. Falta real de
+memória interrompe o candidato. Falhas transitórias têm uma retentativa por
+geração. O fluxo separa conexão, inatividade e limite total configurável.
+O servidor recebe do bootstrap o modelo, contexto, threads e perfil validados.
+Saídas manifestamente corrompidas são bloqueadas antes do TTS.
+
+Arquivos de código: `scripts/bootstrap.py`, `scripts/check_quality.py`,
+`server/services/model_quality.py`, `server/services/llm.py`,
+`server/services/performance.py`, `server/storage/config.py`,
+`server/api/app.py`, `server/main.py` e `config/settings.example.toml`.
+Testes: `tests/test_bootstrap.py`, `tests/test_llm.py`,
+`tests/test_model_quality.py` e `tests/test_server_startup.py`.
+Documentação: README, `docs/qualidade-ia.md` e este registro.
+
+Validação:
+
+- Python: 438 passaram, 3 ignorados e um aviso preexistente de depreciação
+  Starlette/httpx. Simulados CPU sem GPU, RAM abaixo da estimativa, primeiro
+  download, fallback, OOM, lentidão, corrupção, aprovação parcial e retomada.
+- Cliente: build TypeScript e 16 testes passaram. Compilação Python,
+  `git diff --check`, `start.bat --check` e sintaxe de `start.sh` passaram.
+  O projeto não tem comando de lint dedicado.
+- Ollama real no Ryzen 5 5600GT com GTX 1080: selecionado em configuração
+  temporária o `qwen3-vl:2b-instruct` já instalado. Perfil econômico,
+  5/5 casos, estado `approved`, `llm.enabled=true` e reutilização da mesma
+  validação offline. O fluxo com fala sintética passou por Whisper, Ollama,
+  WebSocket e Kokoro, com igualdade do texto na interface e no TTS.
+- O TOML local preserva a seleção manual de `qwen2.5:7b`, ausente no Ollama
+  consultado. A seleção temporária não foi aplicada ao ambiente permanente.
+  O notebook antigo e o download foram simulados. Não houve download real,
+  teste de microfone/alto-falante físico ou execução nativa em Linux.
+
+## Correção solicitada — escolha manual e estimativas de hardware (2026-11-06)
+
+O bootstrap comparava RAM e VRAM livres com o orçamento do `qwen2.5:7b`.
+No perfil equilibrado, o modelo manual também ficava fora da exceção para
+modelos pequenos no perfil econômico. O bootstrap interrompia o fluxo antes
+do download ou da inferência e atribuía `llm.enabled=False` à execução. O
+contexto efetivo medido nesta validação foi de 4.096 tokens.
+
+As estimativas agora orientam avisos e a ordem da seleção automática. O
+bootstrap verifica disponibilidade e instalação, segue a política de
+download e executa uma conversa curta em português para o modelo manual.
+A seleção automática mantém o catálogo, a suíte e o cache de qualidade,
+com uma geração curta para confirmar que um candidato em cache ainda
+responde. A preferência de habilitação permanece separada do estado atual.
+Em Configurações, o usuário pode manter o modelo, salvar uma alternativa
+mais leve ou desativar a IA para a próxima inicialização.
+
+Arquivos alterados nesta correção:
+
+- Inicialização e servidor — `scripts/bootstrap.py`, `server/main.py`,
+  `server/api/app.py`, `server/storage/config.py`, `server/services/llm.py`,
+  `server/services/model_quality.py`, `server/services/performance.py`.
+- Cliente — `client/public/index.html`, `client/src/main.ts`,
+  `client/src/performance.ts`, `client/src/protocol.ts`.
+- Testes — `tests/test_api.py`, `tests/test_bootstrap.py`,
+  `tests/test_conversation.py`, `tests/test_model_quality.py`,
+  `tests/test_performance.py`, `tests/test_server_startup.py`, `tests/test_speech.py`.
+- Documentação — `README.md`, `docs/protocolo.md`, `docs/qualidade-ia.md`
+  e este registro.
+
+Validação:
+
+- Ryzen 5 5600GT com GTX 1080. A primeira preparação offline informou que
+  o modelo manual estava ausente e manteve `llm.enabled=True`. Em seguida,
+  `start.bat --prepare-only` baixou o `qwen2.5:7b` e conseguiu executar a
+  conversa de teste. A repetição offline respondeu em 6,78 s e manteve
+  `llm.enabled=True`. O Ollama informou contexto de 4.096 e execução em GPU.
+- A resposta real do Ollama, em português, passou pelo WebSocket e pelo
+  Kokoro, que produziu 111.232 bytes de PCM. O teste usou entrada de voz
+  simulada, sem microfone ou alto-falante físico.
+- Python: 449 passaram e 3 foram ignorados. Os testes simularam resposta
+  lenta, falta real de memória, falha de carregamento, Ollama indisponível
+  e seleção persistente de um modelo mais leve. Cliente: build TypeScript
+  e 16 testes passaram. `start.bat --check`, sintaxe de `start.sh` e
+  `git diff --check` passaram. A execução nativa foi no Windows.

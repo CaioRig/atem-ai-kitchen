@@ -85,9 +85,11 @@ url = "http://127.0.0.1:11434"
 # Modelo instalado no Ollama (ollama pull <modelo>). Sugestao para GTX 1080 (8 GB) e pt-BR: qwen2.5:7b.
 # Alternativas: llama3.1:8b, gemma2:9b; mais leve: qwen2.5:3b. Meca RAM/VRAM e latencia antes de fixar.
 model = "qwen2.5:7b"
-# Tempo maximo (s) para conectar e para receber a resposta completa.
+# Limites (s) de conexão, inatividade na geração e duração total da geração.
+# O perfil econômico permite pelo menos 180 s de inatividade, sujeito ao limite total.
 connect_timeout_s = 5.0
 timeout_s = 60.0
+generation_limit_s = 600.0
 # Quanto tempo o modelo fica carregado na GPU apos a ultima pergunta (evita recarregar a cada "hey Luna").
 keep_alive = "10m"
 # Criatividade (0 = deterministico) e limite de tokens da resposta (respostas curtas por padrao).

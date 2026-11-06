@@ -15,6 +15,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 GIB = 1024 ** 3
+MODEL_HARDWARE_NOTICE = (
+    "Este modelo pode apresentar lentidão ou consumo elevado de memória neste computador. "
+    "Você pode continuar com ele ou ver alternativas nas configurações."
+)
 PROFILES = ("automatic", "economic", "balanced", "performance")
 log = logging.getLogger("luna.hardware")
 
@@ -213,7 +217,7 @@ class PerformancePolicy:
             self.preferences = self.validate(saved["preferences"])
         except (OSError, ValueError, KeyError, TypeError):
             saved = {}
-        self.profile = self.preferences["profile"]
+        self.profile = settings.performance_runtime_profile or self.preferences["profile"]
         if self.profile == "automatic":
             self.profile = initial_profile(self.hardware)
         self.context = settings.llm_num_ctx or {"economic": 2048, "balanced": 8192, "performance": 16384}[self.profile]
@@ -244,14 +248,63 @@ class PerformancePolicy:
 
     @staticmethod
     def validate(value: dict) -> dict:
-        if not isinstance(value, dict) or set(value) - {"profile", "model", "voice"}:
+        if not isinstance(value, dict) or set(value) - {"profile", "model", "voice", "llm_enabled"}:
             raise ValueError("Preferências inválidas")
         out = {key: value.get(key, default) for key, default in (("profile", "automatic"), ("model", ""), ("voice", ""))}
         if out["profile"] not in PROFILES or not isinstance(out["model"], str) or len(out["model"]) > 200:
             raise ValueError("Perfil ou modelo inválido")
         if out["voice"] not in ("", "pf_dora", "pm_alex", "pm_santa"):
             raise ValueError("Voz inválida")
+        if "llm_enabled" in value:
+            if value["llm_enabled"] is not None and type(value["llm_enabled"]) is not bool:
+                raise ValueError("Preferência de IA inválida")
+            out["llm_enabled"] = value["llm_enabled"]
         return out
+
+    @classmethod
+    def read_preferences(cls, path: Path) -> dict:
+        try:
+            return cls.validate(json.loads(path.read_text(encoding="utf-8"))["preferences"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
+
+    @property
+    def manual_model(self) -> str:
+        return self.preferences["model"] or (self.settings.llm_model if not self.settings.llm_auto_model else "")
+
+    def recommended_models(self) -> list[dict]:
+        if not self.local:
+            return []
+        try:
+            catalog = json.loads((Path(__file__).resolve().parents[2] / "config/model-catalog.json").read_text(encoding="utf-8"))
+            entries = catalog["models"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return []
+        current = self.manual_model or self.settings.llm_model
+        installed = {m.get("name"): m.get("size") or 0 for m in self.models}
+        size = next((e["download_bytes"] for e in entries if current in (e["name"], *e.get("aliases", []))),
+                    installed.get(current, installed.get(current + ":latest", 0)))
+        choices = []
+        ram_free = (self.hardware.ram_available or 0) / GIB
+        vram_free = (self.hardware.vram_available or 0) / GIB
+        for entry in sorted(entries, key=lambda e: e["download_bytes"]):
+            names = (entry["name"], *entry.get("aliases", []))
+            if (not (entry["automatic_allowed"] and entry["chat"] and entry["portuguese"])
+                    or current in names or size and entry["download_bytes"] >= size):
+                continue
+            ratio = max(1, self.context / entry["context"])
+            ram, vram = entry["min_memory_gib"] * ratio, entry["min_vram_gib"] * ratio
+            fits = ((entry["cpu_supported"] and ram_free >= ram)
+                    or (entry["gpu_supported"] and self.hardware.acceleration_verified
+                        and vram_free >= vram and ram_free >= entry["gpu_system_memory_gib"]))
+            choices.append({
+                "name": next((name for name in names if name in installed), entry["name"]),
+                "label": entry["display_name"], "size_bytes": entry["download_bytes"],
+                "ram_gib": round(ram, 1), "vram_gib": round(vram, 1),
+                "fits_estimate": fits,
+                "installed": any(name in installed for name in names),
+            })
+        return sorted(choices, key=lambda entry: (not entry["fits_estimate"], not entry["installed"]))[:3]
 
     def save(self, preferences: dict | None = None) -> None:
         with self._save_lock:
@@ -270,33 +323,28 @@ class PerformancePolicy:
             self.pending_restart = True
 
     def configure_llm(self, client) -> None:
+        prepared = self.settings.llm_quality_cached_only or self.settings.llm_manual_probed
+        manual = "" if prepared else self.preferences["model"]
+        if manual:
+            client.name = manual
+        if self.local:
+            client.num_ctx = self.context
+            client.num_thread = self.threads
+            client.backend_identity = hardware_key(self.hardware)
+            if self.profile == "economic":
+                client.configure_economic()
         try:
             self.models = client.list_models()
-            manual = self.preferences["model"]
-            installed_manual = False
-            if manual:
-                if not any(m.get("name") in (manual, manual + ":latest") for m in self.models):
-                    self.notices.append(f"Modelo solicitado ausente. Instale no servidor: ollama pull {manual}")
-                else:
-                    client.name = manual
-                    installed_manual = True
-            if manual and not installed_manual:
-                client.name = manual  # preserve the explicit choice; check() reports its absence
-            elif (not manual and self.settings.llm_auto_model and not self.settings.bootstrap_managed
-                  and not self.settings.llm_quality_cached_only):
+            if manual and not any(m.get("name") in (manual, manual + ":latest") for m in self.models):
+                self.notices.append(f"Modelo solicitado ausente. Instale no servidor: ollama pull {manual}")
+            if not (manual or prepared or self.settings.bootstrap_managed) and self.settings.llm_auto_model:
                 client.name = choose_model(self.models, self.hardware if self.local else None,
                                            self.profile, client.name)
             selected = next((m for m in self.models if m.get("name") == client.name), {})
-            if self.local and selected.get("size", 0) > max(
+            if self.local and not self.settings.llm_hardware_notice and selected.get("size", 0) > max(
                     max(0, (self.hardware.ram_available or 0) - 2 * GIB) * 0.65,
-                    max(0, (self.hardware.vram or 0) - 2 * GIB) * 0.8):
-                self.notices.append("Memória livre limitada: o start.bat verifica candidatos ultraleves e a reserva dos serviços antes de habilitar a IA.")
-            if self.local:
-                client.num_ctx = self.context
-                client.num_thread = self.threads
-                client.backend_identity = hardware_key(self.hardware)
-                if self.profile == "economic":
-                    client.configure_economic()
+                    max(0, (self.hardware.vram_available or 0) - 2 * GIB) * 0.8 if self.hardware.acceleration_verified else 0):
+                self.settings.llm_hardware_notice = MODEL_HARDWARE_NOTICE
         except (OSError, ValueError, RuntimeError) as exc:
             self.notices.append(f"Otimização do Ollama indisponível: {type(exc).__name__}; configuração preservada.")
 
@@ -330,6 +378,7 @@ class PerformancePolicy:
                 "context": self.context if self.local else None, "threads": self.threads,
                 "tts_engine": self.settings.tts_engine, "tts_voice": self.settings.tts_voice,
                 "models": [m.get("name") for m in self.models], "notices": self.notices[-10:],
+                "recommendations": self.recommended_models(), "manual_model": self.manual_model,
                 "samples": self.samples, "resources": usage, "restart_required": self.pending_restart}
 
 

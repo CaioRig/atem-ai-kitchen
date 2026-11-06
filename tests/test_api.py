@@ -14,6 +14,7 @@ def make_client(tmp_path, **overrides) -> TestClient:
         "debug_allow_state_override": True,
         "client_dir": tmp_path,
         "tts_enabled": False,
+        "llm_enabled": False,
         "memory_path": tmp_path / "memory.sqlite3",
     }
     opts.update(overrides)

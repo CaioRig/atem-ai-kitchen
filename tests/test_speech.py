@@ -24,9 +24,11 @@ from server.assistant.speech import (
 )
 from server.assistant.state import AssistantState, StateMachine
 from server.assistant.voice import VoicePipeline
+from server.services.llm import OllamaClient
 from server.services.tts import TtsError, prepare_text, split_sentences
 from server.storage.config import PROJECT_ROOT, Settings
 from tests.test_conversation import FakeLLM
+from tests.test_llm import ollama
 from tests.test_voice import FakeDetector, FakeTranscriber, silence, speech, wake_frame
 
 TOKEN = "token-de-teste-com-tamanho-ok"
@@ -375,6 +377,7 @@ def ws_client(tmp_path, synth, llm=None):
         stt_model=tmp_path / "nao-existe.bin",
         stt_done_hold_s=0.05,
         memory_path=tmp_path / "memory.sqlite3",
+        performance_path=tmp_path / "performance.json",
     )
     settings.validate()
     app = create_app(
@@ -435,6 +438,21 @@ def test_speech_is_streamed_over_websocket_and_confirmed(tmp_path):
         assert ws.receive_json()["detail"] == ""
         h = c.get("/health").json()
         assert h["spoken"] == 1 and h["speech_failures"] == 0 and h["replies"] == 1
+
+
+def test_manual_ollama_probe_and_reply_reach_tts(tmp_path, ollama):
+    synth = FakeSynth()
+    llm = OllamaClient(ollama.url, "qwen2.5:7b")
+    with ws_client(tmp_path, synth, llm) as c, c.websocket_connect("/ws") as ws:
+        assert hello(ws)["llm"]["available"]
+        assert len(ollama.requests) == 1
+        ollama.pieces = ["Claro! ", "Posso ajudar."]
+        ws.send_bytes(wake_frame() + speech(6))
+        ws.send_bytes(silence(20))
+        messages = collect_until(ws, lambda event: event["type"] == "speak_end")
+        assert synth.calls == ["Claro! Posso ajudar."]
+        assert any(kind == "bytes" for kind, _ in messages)
+        assert [message["role"] for message in ollama.requests[-1]["messages"]] == ["system", "user"]
 
 
 def test_speech_error_and_replay_over_websocket(tmp_path):

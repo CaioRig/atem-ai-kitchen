@@ -12,8 +12,10 @@ import pytest
 
 from scripts import bootstrap as boot
 from scripts import downloads
+from scripts.bootstrap import validate_model_selection
 from server.services.performance import GIB, Hardware
 from server.storage.config import Settings, apply_automatic_settings
+from tests.test_llm import ollama
 
 CATALOG = boot.read_json(boot.ROOT / "config/model-catalog.json")
 
@@ -193,13 +195,13 @@ def test_existing_client_skips_node_npm_and_build(tmp_path, monkeypatch):
     assert boot.ensure_client(tmp_path, CATALOG, state, True) == state["client"]
 
 
-def test_invalid_model_disables_only_ai_and_preserves_last_approval(installation, monkeypatch):
+def test_invalid_model_preserves_enablement_and_last_approval(installation, monkeypatch):
     root, calls, h, models, options = installation
     first = boot.prepare(root, options, [])
     previous_quality = first["state"]["quality"]
     monkeypatch.setattr(boot, "validate_model_selection", lambda *a, **kw: (_ for _ in ()).throw(boot.BootstrapError("modelo corrompido")))
     result = boot.prepare(root, options, [])
-    assert not result["settings"].llm_enabled
+    assert result["settings"].llm_enabled
     assert result["settings"].tts_enabled
     assert result["state"]["quality"] == previous_quality
     assert result["state"]["llm_status"]["available"] is False
@@ -321,6 +323,33 @@ def test_main_reexecutes_venv_by_prefix_not_resolved_symlink(tmp_path, monkeypat
     monkeypatch.setattr(boot.subprocess, "call", lambda args, **kw: commands.append(args) or 0)
     assert boot.main(["--offline", "--prepare-only"]) == 0
     assert commands[0][0] == str(venv)
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_launcher_passes_manual_availability_without_disabling_preference(tmp_path, monkeypatch, available):
+    venv = tmp_path / ".venv"
+    python = venv / "python"
+    settings = Settings(llm_hardware_notice=boot.MODEL_HARDWARE_NOTICE,
+                        llm_unavailable_reason="" if available else "Ollama indisponível")
+    state = {"llm_status": {"available": available}, "selection_origin": "manual", "profile": "balanced",
+             "quality": {"model": "qwen2.5:7b", "options": {"num_ctx": 4096, "num_thread": 8}}}
+    commands = []
+    monkeypatch.setattr(boot, "ROOT", tmp_path)
+    monkeypatch.setattr(boot.sys, "prefix", str(venv))
+    monkeypatch.setattr(boot, "prepare_venv", lambda *a: python)
+    monkeypatch.setattr(boot, "prepare", lambda *a: {"settings": settings, "state": state})
+    monkeypatch.setattr(boot, "command", lambda args: commands.append(args))
+    assert boot.main(["--offline"]) == 0
+    assert len(commands) == 1
+    args = commands[0]
+    assert args[:3] == [str(python), "-m", "server.main"]
+    assert "--without-llm" not in args and "--llm-hardware-notice" in args
+    if available:
+        assert args[3:14] == ["--llm-probed", "--llm-model", "qwen2.5:7b", "--llm-profile", "balanced",
+                              "--llm-context", "4096", "--llm-threads", "8", "--llm-hardware-notice",
+                              boot.MODEL_HARDWARE_NOTICE]
+    else:
+        assert "--llm-unavailable=Ollama indisponível" in args
 
 
 def test_unknown_installed_family_does_not_imply_compatibility():
@@ -483,7 +512,7 @@ def test_ollama_service_failure_does_not_block_other_services(installation, monk
     root, calls, h, models, options = installation
     monkeypatch.setattr(boot, "ensure_ollama", lambda *a: (_ for _ in ()).throw(boot.BootstrapError("offline")))
     result = boot.prepare(root, options, [])
-    assert not result["settings"].llm_enabled
+    assert result["settings"].llm_enabled
     assert result["state"]["llm_status"]["reason"] == "offline"
     assert calls["voice"] == ["warmup"]
     assert Settings.from_toml(root / "config/settings.toml").llm_enabled
@@ -539,7 +568,7 @@ def test_economic_empty_ollama_downloads_and_persists_small_candidate(installati
     assert calls["pull"] == ["qwen2.5:1.5b"]
 
 
-def test_two_gib_free_uses_half_billion_and_insufficient_memory_disables(installation, caplog):
+def test_two_gib_free_uses_half_billion_and_lower_estimate_still_tries_it(installation, caplog):
     root, calls, h, models, options = installation
     h.ram_available, h.available_threads = 2 * GIB, 4
     models.clear()
@@ -549,14 +578,117 @@ def test_two_gib_free_uses_half_billion_and_insufficient_memory_disables(install
     assert calls["pull"] == ["qwen2.5:0.5b"]
     h.ram_available = GIB // 2
     second = boot.prepare(root, options, [])
-    assert not second["settings"].llm_enabled
-    assert second["state"]["model"] is None
-    assert "Memória" in second["state"]["llm_status"]["reason"]
-    assert "IA=qwen2.5:7b" not in caplog.text
-    assert "llm_model" not in boot.read_json(root / "data/bootstrap-auto.json")["selected"]
+    assert second["settings"].llm_enabled
+    assert second["state"]["model"] == "qwen2.5:0.5b"
+    assert second["state"]["llm_status"]["available"]
+    assert boot.MODEL_HARDWARE_NOTICE in caplog.text
     assert calls["pull"] == ["qwen2.5:0.5b"]
     h.ram_available = 2 * GIB
     assert boot.prepare(root, options, [])["settings"].llm_enabled
+
+
+@pytest.mark.parametrize("failure,code", [
+    (None, ""), ("requires more system memory", "memory_insufficient"), ("failed to load model: invalid GGUF", "model_load"),
+])
+def test_ryzen_manual_model_below_estimate_attempts_real_chat_protocol(installation, monkeypatch, ollama, failure, code):
+    root, calls, h, models, options = installation
+    h.cpu, h.available_threads, h.ram_available = "AMD Ryzen 5 5600GT", 12, 5 * GIB
+    h.acceleration_verified, h.vram, h.vram_available = True, 8 * GIB, 6 * GIB
+    path, _ = boot.ensure_config(root)
+    original = (path.read_text(encoding="utf-8")
+                .replace("automatic_model = true", "automatic_model = false")
+                .replace('url = "http://127.0.0.1:11434"', f'url = "{ollama.url}"')
+                .replace("timeout_s = 60.0", "timeout_s = 0.25")
+                .replace("# num_ctx = 0", "num_ctx = 4096", 1)
+                .replace("# num_ctx = 0", "# contexto definido acima"))
+    path.write_text(original, encoding="utf-8")
+    options.offline = True
+    ollama.error = failure
+    ollama.piece_interval = .1  # the full answer takes longer than the inactivity timeout
+    monkeypatch.setattr(boot, "validate_model_selection", validate_model_selection)
+    result = boot.prepare(root, options, [])
+    assert result["settings"].llm_enabled
+    assert result["settings"].llm_model == "qwen2.5:7b"
+    assert boot.MODEL_HARDWARE_NOTICE == result["settings"].llm_hardware_notice
+    assert len(ollama.requests) == 1 and ollama.requests[0]["model"] == "qwen2.5:7b"
+    assert ollama.requests[0]["options"]["num_ctx"] == 4096
+    assert result["state"]["llm_status"]["available"] is (failure is None)
+    if failure:
+        reason = result["state"]["llm_status"]["reason"]
+        assert f"({code})" in reason
+        ollama.error = None
+        assert boot.prepare(root, options, [])["state"]["llm_status"]["available"]
+    assert calls["pull"] == [] and calls["voice"] == ["warmup"]
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_missing_manual_model_obeys_download_policy_without_changing_choice(installation):
+    root, calls, h, models, options = installation
+    models.clear()
+    path, _ = boot.ensure_config(root)
+    text = path.read_text(encoding="utf-8").replace("automatic_model = true", "automatic_model = false")
+    path.write_text(text, encoding="utf-8")
+    options.offline = True
+    result = boot.prepare(root, options, [])
+    assert "ausente no Ollama" in result["state"]["llm_status"]["reason"]
+    assert result["settings"].llm_enabled and not calls["pull"]
+    options.offline = False
+    assert boot.prepare(root, options, [])["state"]["model"] == "qwen2.5:7b"
+    assert calls["pull"] == ["qwen2.5:7b"]
+
+
+def test_saved_lighter_model_and_explicit_disable_apply_on_next_boot(installation, monkeypatch):
+    root, calls, h, models, options = installation
+    path, _ = boot.ensure_config(root)
+    original = path.read_bytes()
+    preferences = {"model": "qwen2.5:0.5b"}
+    prefs_path = Settings.from_toml(path).performance_path
+    boot.write_json(prefs_path, {"preferences": preferences})
+    result = boot.prepare(root, options, [])
+    assert result["state"]["selection_origin"] == "manual"
+    assert result["state"]["model"] == "qwen2.5:0.5b"
+    assert calls["pull"] == ["qwen2.5:0.5b"]
+    boot.write_json(prefs_path, {"preferences": {**preferences, "llm_enabled": False}})
+    monkeypatch.setattr(boot, "ensure_ollama", lambda *a: pytest.fail("IA desativada pelo usuário"))
+    result = boot.prepare(root, options, [])
+    assert not result["settings"].llm_enabled
+    assert result["state"]["llm_status"] == {"available": False, "status": "disabled"}
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_below_estimate_download_and_limited_approval_survive_offline_restart(installation, monkeypatch, fail_first):
+    from server.services import model_quality
+    from tests.test_model_quality import ANSWERS, TestModel
+
+    root, calls, h, models, options = installation
+    h.ram_available, h.available_threads = int(1.42 * GIB), 4
+    models.clear()
+    env = {"calls": [], "models": {}}
+    monkeypatch.setattr(boot, "detect_server", lambda: h)
+    monkeypatch.setitem(ANSWERS, "Quanto é 2 + 2?", "Acho que é cinco.")
+
+    def configured(settings, hardware):
+        env["models"] = {m["name"]: {"digest": m["digest"]} for m in models}
+        if fail_first:
+            env["models"]["gemma3:270m"]["bad"] = "asdfghjkl"
+        client = TestModel(env, settings.llm_model)
+        client.configure_economic()
+        client.num_ctx = settings.llm_num_ctx
+        return client
+
+    monkeypatch.setattr(model_quality, "configured_client", configured)
+    monkeypatch.setattr(boot, "validate_model_selection", validate_model_selection)
+    first = boot.prepare(root, options, [])
+    downloads = ["gemma3:270m", "qwen2.5:0.5b"] if fail_first else ["gemma3:270m"]
+    assert first["state"]["model"] == downloads[-1]
+    assert first["state"]["llm_status"] == {"available": True, "status": "limited"}
+    assert first["settings"].llm_enabled and first["settings"].llm_num_ctx == 2048
+    assert calls["pull"] == downloads and len(env["calls"]) == 4 * len(downloads)
+    options.offline = True
+    second = boot.prepare(root, options, [])
+    assert second["settings"].llm_enabled and second["state"]["quality"]["status"] == "limited"
+    assert calls["pull"] == downloads and len(env["calls"]) == 4 * len(downloads) + 1
 
 
 def test_memory_failure_unloads_and_falls_back_only_to_smaller_model(installation, monkeypatch):
