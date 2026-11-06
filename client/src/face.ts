@@ -9,13 +9,13 @@ const EYE_DX = 8;
 
 const COLORS: Record<Mood, string> = {
   booting: "#8fa3bf",
-  idle: "#7ad7ff",
-  listening: "#7cff9a",
-  processing: "#ffd166",
-  speaking: "#9ad0ff",
-  media: "#d19aff",
-  offline: "#556070",
-  error: "#ff6b6b",
+  idle: "#f1ce90",
+  listening: "#c3e298",
+  processing: "#ffc779",
+  speaking: "#b9e1ce",
+  media: "#e5b7d6",
+  offline: "#b7bda4",
+  error: "#ffa28e",
 };
 
 export class PixelFace {
@@ -25,29 +25,36 @@ export class PixelFace {
   private moodSince = 0;
   private level = 0;
   private running = false;
-  private lastFrame = 0;
+  private timer: number | undefined;
+  private visible = false;
   private readonly reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   private nextBlink = 2;
   private blinkUntil = 0;
-  private readonly onResize = () => this.resize();
-  private readonly onVisibility = () => (document.hidden ? this.pause() : this.resume());
+  private readonly onVisibility = () => this.refresh();
+  private readonly observer = new ResizeObserver(([entry]) => {
+    this.visible = entry.contentRect.width > 0 && entry.contentRect.height > 0;
+    this.refresh();
+  });
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    canvas: HTMLCanvasElement,
     private fps = 20,
   ) {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("Canvas 2D indisponível");
     this.ctx = ctx;
-    this.resize();
-    window.addEventListener("resize", this.onResize);
+    canvas.width = GW;
+    canvas.height = GH;
+    this.observer.observe(canvas);
     document.addEventListener("visibilitychange", this.onVisibility);
+    this.reducedMotion.addEventListener("change", this.onVisibility);
   }
 
   setMood(mood: Mood): void {
     if (mood === this.mood) return;
     this.mood = mood;
     this.moodSince = performance.now() / 1000;
+    this.refresh();
   }
 
   getMood(): Mood {
@@ -66,45 +73,30 @@ export class PixelFace {
   start(): void {
     if (this.running) return;
     this.running = true;
-    requestAnimationFrame(this.frame);
+    this.refresh();
   }
 
   stop(): void {
     this.running = false;
-    window.removeEventListener("resize", this.onResize);
+    this.refresh();
+    this.observer.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.reducedMotion.removeEventListener("change", this.onVisibility);
   }
 
-  private pause(): void {
-    this.running = false;
-  }
-
-  private resume(): void {
-    if (!this.running) {
-      this.running = true;
-      requestAnimationFrame(this.frame);
-    }
-  }
-
-  private resize(): void {
-    this.canvas.width = Math.max(1, this.canvas.clientWidth);
-    this.canvas.height = Math.max(1, this.canvas.clientHeight);
-    this.lastFrame = 0;
-  }
-
-  private readonly frame = (now: number): void => {
-    if (!this.running) return;
-    requestAnimationFrame(this.frame);
-    if (now - this.lastFrame < 1000 / this.fps) return;
-    this.lastFrame = now;
-    this.draw(this.reducedMotion.matches ? this.moodSince : now / 1000);
+  private readonly refresh = (): void => {
+    window.clearTimeout(this.timer);
+    if (!this.running || !this.visible || document.hidden) return;
+    const reduced = this.reducedMotion.matches;
+    this.draw(reduced ? 0 : performance.now() / 1000);
+    if (!reduced) this.timer = window.setTimeout(this.refresh, 1000 / this.fps);
   };
 
   // ---- composição ---------------------------------------------------------
 
   private draw(t: number): void {
     this.cells.fill(0);
-    const blinking = this.updateBlink(t);
+    const blinking = !this.reducedMotion.matches && this.updateBlink(t);
     switch (this.mood) {
       case "booting":
         this.drawBooting(t);
@@ -283,19 +275,17 @@ export class PixelFace {
   }
 
   private render(color: string): void {
-    const { width: W, height: H } = this.canvas;
-    const s = Math.max(1, Math.floor(Math.min(W / GW, H / GH)));
-    const ox = Math.floor((W - GW * s) / 2);
-    const oy = Math.floor((H - GH * s) / 2);
-    const gap = s >= 6 ? 1 : 0;
     const ctx = this.ctx;
-    ctx.fillStyle = "#0b0e14";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#222b20";
+    ctx.fillRect(0, 0, GW, GH);
+    ctx.fillStyle = "#49513c";
+    ctx.fillRect(10, 16, 4, 1);
+    ctx.fillRect(35, 16, 4, 1);
     ctx.fillStyle = color;
     for (let y = 0; y < GH; y++) {
       const row = y * GW;
       for (let x = 0; x < GW; x++) {
-        if (this.cells[row + x]) ctx.fillRect(ox + x * s, oy + y * s, s - gap, s - gap);
+        if (this.cells[row + x]) ctx.fillRect(x, y, 1, 1);
       }
     }
   }

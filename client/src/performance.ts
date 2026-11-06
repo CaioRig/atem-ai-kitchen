@@ -48,7 +48,7 @@ export function setupPerformance(token: string, face: PixelFace): void {
       render(await response.json() as PerformanceStatus);
     } catch (error) { status.textContent = `Não foi possível carregar ou salvar desempenho: ${String(error)}`; }
   };
-  document.getElementById("settings-open")!.addEventListener("click", () => void request());
+  document.addEventListener("luna:settings-opened", () => void request());
   document.getElementById("performance-save")!.addEventListener("click", () => void request({ profile: profile.value, model: model.value, voice: voice.value }));
   document.getElementById("performance-reset")!.addEventListener("click", () => void request({ profile: "automatic", model: "", voice: "" }));
 }

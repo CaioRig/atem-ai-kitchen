@@ -55,6 +55,7 @@ const MOOD_LABELS: Record<Mood, string> = {
 /** Nome do estado em pt-BR para o indicador visual. Enquanto a IA responde, "Respondendo";
  *  enquanto a voz é gerada, "Preparando". */
 export function moodLabel(mood: Mood, state: ServerState | null = null): string {
+  if (state === "transcribing" && mood === "processing") return "Transcrevendo";
   if (state === "replying" && mood === "processing") return "Respondendo";
   if (state === "synthesizing" && mood === "processing") return "Preparando";
   return MOOD_LABELS[mood];
@@ -252,6 +253,7 @@ export function memoryButtonLabel(count: number): string {
 
 /** Clima (Fase 8): o que o cartão mostra, a partir do estado enviado pelo servidor (cache). */
 export interface WeatherInfo {
+  location?: string;
   date?: string;
   timezone?: string;
   available: boolean;
@@ -288,5 +290,6 @@ export function weatherUpdatedLabel(w: WeatherInfo, now: Date = new Date()): str
   else when = `em ${then.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} às ${hhmm}`;
   let label = `${w.stale ? "Dados antigos · atualizado" : "Atualizado"} ${when}`;
   if (w.status === "offline") label += " · sem internet, usando dados salvos";
+  else if (w.status === "cache" || w.status === "cached_only") label += " · dados salvos";
   return label;
 }

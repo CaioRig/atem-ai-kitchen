@@ -18,12 +18,14 @@ export class Panel {
   private readonly heard = byId("heard");
   private readonly weatherText = byId("weather-text");
   private readonly weatherUpdated = byId("weather-updated");
+  private readonly weatherIcon = document.querySelector("#weather-icon")!;
   private readonly conn = byId("conn");
   private readonly mic = byId<HTMLButtonElement>("mic");
   private readonly cancel = byId<HTMLButtonElement>("cancel");
   private readonly retry = byId<HTMLButtonElement>("retry");
   private readonly offlineBadge = byId("offline-badge");
   private readonly memoryBtn = byId<HTMLButtonElement>("memory");
+  private readonly ingredientsBtn = byId<HTMLButtonElement>("ingredients-open");
   private readonly memoryPanel = byId("memory-panel");
   private readonly memoryTitle = byId("memory-title");
   private readonly memoryList = byId("memory-list");
@@ -34,6 +36,7 @@ export class Panel {
   private toastTimer: number | undefined;
   private clearArmTimer: number | undefined;
   private memoryDeleteHandler: ((id: number) => void) | null = null;
+  private ingredientsOnly = false;
   private readonly timeFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
   private readonly dateFmt = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" });
   private lastMinute = -1;
@@ -52,23 +55,38 @@ export class Panel {
   }
 
   setStatus(text: string): void {
-    this.status.textContent = text;
+    if (this.status.textContent !== text) this.status.textContent = text;
   }
 
   /** Indicador textual do estado atual; `mood` também vira classe CSS para a cor. */
   setMood(mood: string, label: string): void {
-    this.mood.textContent = label;
-    this.mood.className = `mood mood-${mood}`;
+    const className = `mood mood-${mood}`;
+    if (this.mood.textContent !== label) this.mood.textContent = label;
+    if (this.mood.className !== className) this.mood.className = className;
   }
 
   setHeard(text: string, final = true): void {
-    this.heard.textContent = text || "—";
+    this.heard.textContent = text || "Aguardando sua pergunta.";
     this.heard.classList.toggle("partial", !final);
   }
 
   /** Cartão "Clima": resumo, linha de atualização (hora da consulta à fonte) e destaque quando os dados estão antigos. */
-  setWeather(text: string, updatedLabel: string, stale = false): void {
-    this.weatherText.textContent = text;
+  setWeather(text: string, updatedLabel: string, stale = false, location?: string): void {
+    const temperature = /^(-?\d+(?:[.,]\d+)?\s*°C)\s*·\s*/.exec(text);
+    if (temperature) {
+      const value = document.createElement("strong");
+      value.className = "weather-temperature";
+      value.textContent = temperature[1];
+      this.weatherText.replaceChildren(value, text.slice(temperature[0].length));
+    } else {
+      this.weatherText.textContent = text;
+    }
+    const condition = (temperature ? text.slice(temperature[0].length) : text).split(" · ")[0].toLowerCase();
+    const icon = /^(sol|céu limpo)/.test(condition) ? "sun"
+      : /chuva|garoa|tempestade/.test(condition) ? "rain"
+      : /nuvens|nublado|nevoeiro/.test(condition) ? "cloud" : "weather";
+    this.weatherIcon.setAttribute("href", `#icon-${icon}`);
+    if (location) byId("weather-location").textContent = `Clima · ${location}`;
     this.weatherUpdated.textContent = updatedLabel;
     this.weatherUpdated.classList.toggle("stale", stale);
   }
@@ -82,8 +100,8 @@ export class Panel {
   }
 
   setMic(state: MicState, message = ""): void {
-    document.getElementById("mic-help")!.classList.toggle("hidden", state === "on");
-    this.mic.textContent = micLabel(state, message);
+    this.mic.textContent = micLabel(state);
+    this.mic.title = message ? micLabel(state, message) : "Ligar ou desligar o microfone (tecla M)";
     this.mic.classList.toggle("ok", state === "on");
     this.mic.classList.toggle("warn", state === "off" || state === "starting" || state === "blocked");
     this.mic.classList.toggle("err", state === "denied" || state === "unavailable" || state === "insecure");
@@ -98,7 +116,6 @@ export class Panel {
   setCancelVisible(visible: boolean): void {
     this.cancel.classList.remove("hidden");
     this.cancel.disabled = !visible;
-    this.cancel.textContent = "Parar / cancelar";
   }
 
   onCancel(fn: () => void): void {
@@ -120,7 +137,7 @@ export class Panel {
   /** Botão "Memória" com a contagem no rótulo; escondido quando o servidor não tem memória. */
   setMemory(available: boolean, count: number): void {
     this.memoryBtn.classList.toggle("hidden", !available);
-    this.memoryBtn.textContent = memoryButtonLabel(count);
+    byId("memory-label").textContent = memoryButtonLabel(count);
     if (!available) this.setMemoryVisible(false);
   }
 
@@ -128,20 +145,39 @@ export class Panel {
     return !this.memoryPanel.classList.contains("hidden");
   }
 
-  setMemoryVisible(visible: boolean): void {
+  setMemoryVisible(visible: boolean, ingredients = this.ingredientsOnly): void {
+    if (!visible && !this.memoryVisible) return;
     if (visible) document.dispatchEvent(new CustomEvent("luna:panel", { detail: "memory-panel" }));
+    this.ingredientsOnly = visible && ingredients;
     this.memoryPanel.classList.toggle("hidden", !visible);
-    this.memoryBtn.setAttribute("aria-expanded", String(visible));
+    this.memoryBtn.setAttribute("aria-expanded", String(visible && !ingredients));
+    this.ingredientsBtn.setAttribute("aria-expanded", String(visible && ingredients));
     if (!visible) this.disarmClear();
+    document.dispatchEvent(new Event("luna:panel-changed"));
   }
 
   /** Lista de memórias (todas, ou as de um assunto pedido por voz); cada linha tem "Esquecer". */
   renderMemories(items: MemoryItem[], topic = ""): void {
-    this.memoryTitle.textContent = topic ? `Memória · ${topic}` : "Memória da Luna";
-    this.memoryList.replaceChildren(...items.map((item) => this.memoryRow(item)));
-    this.memoryEmpty.classList.toggle("hidden", items.length > 0);
-    this.memoryClear.classList.toggle("hidden", items.length === 0 || topic !== "");
+    const stock = this.ingredientsOnly || /^ingredientes\b/i.test(topic);
+    const rows = stock ? items.filter(item => item.kind === "ingredient") : items;
+    const restoreFocus = this.memoryList.contains(document.activeElement);
+    this.memoryTitle.textContent = stock ? (topic || "Despensa") : topic ? `Memória · ${topic}` : "Memória da Luna";
+    this.memoryEmpty.textContent = stock
+      ? "Nenhum ingrediente nesta lista. Diga “hey Luna, tenho três ovos” para começar."
+      : "Nada guardado ainda. Diga “hey Luna, lembre que…” para começar.";
+    byId("memory-help").textContent = stock
+      ? "Para atualizar uma quantidade, diga “hey Luna, agora tenho dois ovos”."
+      : "As informações ficam guardadas neste servidor.";
+    this.memoryList.replaceChildren(...rows.map((item) => this.memoryRow(item)));
+    if (restoreFocus) this.memoryList.focus();
+    this.memoryEmpty.classList.toggle("hidden", rows.length > 0);
+    this.memoryClear.classList.toggle("hidden", stock || rows.length === 0 || topic !== "");
     this.disarmClear();
+  }
+
+  showMemoryLoading(ingredients: boolean): void {
+    this.renderMemories([], ingredients ? "Despensa" : "");
+    this.memoryEmpty.textContent = "Carregando lista…";
   }
 
   private memoryRow(item: MemoryItem): HTMLLIElement {
@@ -152,13 +188,25 @@ export class Panel {
     kind.textContent = memoryKindLabel(item.kind);
     const text = document.createElement("span");
     text.className = "memory-text";
-    text.textContent = item.text;
+    const ingredient = item.kind === "ingredient" ? /^([^:]+):\s*(.+)$/.exec(item.text) : null;
+    if (ingredient) {
+      const name = document.createElement("strong");
+      name.textContent = ingredient[1];
+      const amount = document.createElement("span");
+      amount.className = "ingredient-amount";
+      amount.textContent = ingredient[2];
+      text.append(name, amount);
+    } else {
+      text.textContent = item.text;
+    }
     const forget = document.createElement("button");
     forget.type = "button";
     forget.className = "pill warn memory-forget";
-    forget.textContent = "Esquecer";
-    forget.title = "Apagar esta memória";
-    forget.addEventListener("click", () => this.memoryDeleteHandler?.(item.id));
+    forget.textContent = item.kind === "ingredient" ? "Remover" : "Esquecer";
+    forget.setAttribute("aria-label", `${forget.textContent}: ${ingredient?.[1] ?? item.text}`);
+    forget.addEventListener("click", () => {
+      if (window.confirm(`Remover “${ingredient?.[1] ?? item.text}”?`)) this.memoryDeleteHandler?.(item.id);
+    });
     li.append(kind, text, forget);
     return li;
   }

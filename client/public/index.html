@@ -3,45 +3,99 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <title>LUNA</title>
+    <meta name="color-scheme" content="light dark" />
+    <title>Luna · Assistente de cozinha</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-pot" viewBox="0 0 16 16"><path d="M7 1h2v2h4v2H3V3h4zM1 6h14v2h-2v5h-2v1H5v-1H3V8H1zm4 2v4h6V8z"/></symbol>
+      <symbol id="icon-chat" viewBox="0 0 16 16"><path d="M2 2h12v2h1v7H9l-4 4v-4H1V4h1zm1 2v5h4v2l2-2h4V4z"/><path d="M5 6h6v1H5z"/></symbol>
+      <symbol id="icon-pantry" viewBox="0 0 16 16"><path d="M2 2h12v4h1v8H1V6h1zm2 2v2h8V4zM3 8v4h10V8zm3 1h4v2H6z"/></symbol>
+      <symbol id="icon-book" viewBox="0 0 16 16"><path d="M3 1h10v2h1v12H3v-2H2V3h1zm1 2v8h8V3zm0 10h8v1H4zm2-8h4v2H6zm0 3h4v1H6z"/></symbol>
+      <symbol id="icon-video" viewBox="0 0 16 16"><path d="M1 2h14v12H1zm2 2v8h10V4zm3 1h2v1h2v1h1v2h-1v1H8v1H6z"/></symbol>
+      <symbol id="icon-gear" viewBox="0 0 16 16"><path d="M6 1h4v2h2v1h2v2h1v4h-1v2h-2v1h-2v2H6v-2H4v-1H2v-2H1V6h1V4h2V3h2zm0 5v4h4V6z"/></symbol>
+      <symbol id="icon-sun" viewBox="0 0 16 16"><path d="M7 0h2v3H7zM7 13h2v3H7zM0 7h3v2H0zM13 7h3v2h-3zM2 2h2v2H2zM12 2h2v2h-2zM2 12h2v2H2zM12 12h2v2h-2zM6 4h4v2h2v4h-2v2H6v-2H4V6h2z"/></symbol>
+      <symbol id="icon-cloud" viewBox="0 0 16 16"><path d="M5 3h6v2h2v2h2v5H1V7h2V5h2zm1 2v2H5v2H3v1h10V9h-2V7H9V5z"/></symbol>
+      <symbol id="icon-rain" viewBox="0 0 16 16"><path d="M5 1h6v2h2v2h2v5H1V5h2V3h2zm1 2v2H5v2H3v1h10V7h-2V5H9V3zM3 12h2v2H3zm4 1h2v2H7zm4-1h2v2h-2z"/></symbol>
+      <symbol id="icon-weather" viewBox="0 0 16 16"><path d="M6 1h4v1h2v3h-1v2H9v2H7V6h2V5h1V3H6v2H4V2h2zm1 10h2v3H7z"/></symbol>
+    </svg>
     <main id="app">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#icon-pot"/></svg></span>
+          <div><h1>Luna</h1><p>Sua assistente de cozinha</p></div>
+        </div>
+        <div class="connection" aria-label="Conexão">
+          <span id="conn" class="pill warn" role="status">Servidor: conectando…</span>
+          <span id="offline-badge" class="pill warn">Modo offline</span>
+        </div>
+      </header>
       <section id="stage">
-        <div class="brand">LUNA <span>Sua companhia na cozinha</span></div>
-        <canvas id="face" aria-label="Rosto do assistente"></canvas>
+        <div id="portrait">
+          <span class="stage-caption">Assistente de voz</span>
+          <div class="portrait-device">
+            <canvas id="face" role="img" aria-label="Rosto pixelado da Luna"></canvas>
+          </div>
+          <svg class="kitchen-art" viewBox="0 0 160 45" aria-hidden="true" shape-rendering="crispEdges">
+            <path fill="#a18b5f" d="M0 40h160v2H0z"/>
+            <path fill="#e4b177" d="M10 20h4v-3h22v3h4v4h-3v12h-4v4H17v-4h-4V24h-3z"/>
+            <path fill="#af6549" d="M16 24h18v12h-3v4H19v-4h-3z"/>
+            <path fill="#f4cf97" d="M20 13h4v4h-4zm4-5h3v5h-3zm8 1h3v5h-3z"/>
+            <path fill="#92ae7b" d="M132 13h5v5h4V7h4v7h4v-3h6v5h-5v5h-5v5h-4v-4h-5v-5h-4z"/>
+            <path fill="#d29066" d="M133 25h20v5h-2v7h-3v3h-10v-3h-3v-7h-2z"/>
+          </svg>
+        </div>
         <section id="stage-content" class="hidden" aria-labelledby="stage-title">
           <header><h2 id="stage-title">Luna responde</h2><button id="stage-back" class="pill" type="button">Voltar para Luna</button></header>
           <div id="stage-scroll" tabindex="0" aria-label="Conteúdo da Luna"></div>
         </section>
-        <div id="mood" class="mood" aria-live="polite">Inicializando</div>
-        <div id="status" class="status">Inicializando…</div>
+        <div class="stage-state">
+          <div id="mood" class="mood" role="status">Inicializando</div>
+          <div id="status" class="status">Inicializando…</div>
+        </div>
       </section>
-      <aside id="panel">
-        <div id="content-scroll">
-        <div id="clock">
+      <aside id="panel" aria-label="Informações da cozinha">
+        <div id="content-scroll" tabindex="0" aria-label="Relógio, clima e conversa">
+        <div id="clock" class="card">
+          <div class="label">Hora local</div>
           <div id="time">--:--</div>
           <div id="date">—</div>
         </div>
-        <div class="card">
-          <div class="label">Clima · Ouro Fino, MG</div>
-          <div id="weather-text" class="text">Sem dados</div>
+        <div class="card weather-card">
+          <div class="weather-heading">
+            <svg class="icon weather-icon" aria-hidden="true"><use id="weather-icon" href="#icon-weather"/></svg>
+            <div>
+              <h2 class="label" id="weather-location">Clima</h2>
+              <div id="weather-text" class="text">Sem dados</div>
+            </div>
+          </div>
           <div id="weather-updated" class="muted">
             Sem dados — nunca atualizado
           </div>
+          <button id="weather-open" class="pill quiet" type="button">Ver previsão</button>
         </div>
-        <div class="card">
-          <div class="label">Você disse</div>
-          <div id="heard" class="text">—</div>
+        <div class="card conversation-card">
+          <h2 class="label">Última conversa</h2>
+          <div class="exchange"><span class="speaker">Você</span><div id="heard" class="text">Aguardando sua pergunta.</div></div>
+          <div class="exchange"><span class="speaker">Luna</span><div id="answer-preview" class="text">A resposta aparece aqui.</div></div>
+          <button id="answer-open" class="pill quiet hidden" type="button">Ler resposta completa</button>
         </div>
         </div>
-        <div id="indicators" aria-label="Controles da Luna">
-          <span id="conn" class="pill warn">Servidor: conectando…</span>
+      </aside>
+      <footer id="indicators" aria-label="Controles da Luna">
+        <nav class="quick-nav" aria-label="Atalhos">
+          <button id="home" class="pill" type="button" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#icon-chat"/></svg>Conversa</button>
+          <button id="recipes-open" class="pill" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-pot"/></svg>Receitas</button>
+          <button id="ingredients-open" class="pill" type="button" aria-controls="memory-panel" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#icon-pantry"/></svg>Despensa</button>
+          <button id="memory" class="pill hidden" type="button" aria-controls="memory-panel" aria-expanded="false" title="Ver memórias (tecla L)"><svg class="icon" aria-hidden="true"><use href="#icon-book"/></svg><span id="memory-label">Memória</span></button>
+          <button id="video-search" class="pill" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-video"/></svg>YouTube</button>
+          <button id="settings-open" class="pill" type="button" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#icon-gear"/></svg>Configurações</button>
+        </nav>
+        <div class="voice-actions">
           <button
             id="mic"
-            class="pill"
+            class="pill primary"
             type="button"
             title="Ligar ou desligar o microfone (tecla M)"
           >
@@ -53,7 +107,7 @@
             type="button"
             title="Cancelar a interação ou parar a fala (tecla Esc)"
           >
-            Cancelar
+            Parar / cancelar
           </button>
           <button
             id="retry"
@@ -63,26 +117,18 @@
           >
             Tentar novamente
           </button>
-          <button
-            id="memory"
-            class="pill hidden"
-            type="button"
-            title="Ver e gerenciar o que a Luna lembra (tecla L)"
-            aria-expanded="false"
-          >
-            Memória
-          </button>
-          <span id="offline-badge" class="pill warn">Modo offline</span>
           <button id="replay-answer" class="pill" type="button">Repetir resposta</button>
-          <button id="video-search" class="pill" type="button">Vídeos no YouTube</button>
-          <button id="settings-open" class="pill" type="button">Configurações</button>
-          <button id="home" class="pill" type="button">Tela principal</button>
-          <p id="mic-help" class="muted hidden">Microfone desligado: toque em Microfone para usar a voz.</p>
         </div>
-      </aside>
+      </footer>
     </main>
-    <section id="settings-panel" class="hidden" role="dialog" aria-labelledby="settings-title">
-      <header><h2 id="settings-title">Do seu jeito</h2><button id="settings-close" class="pill" type="button">Fechar</button></header>
+    <section id="settings-panel" class="hidden dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header><h2 id="settings-title">Configurações</h2><button id="settings-close" class="pill" type="button">Fechar</button></header>
+      <h3>Aparência</h3>
+      <div class="setting-row"><label for="theme">Tema</label><select id="theme"><option value="auto">Do sistema</option><option value="light">Claro</option><option value="dark">Escuro</option></select></div>
+      <div class="setting-row"><span>Tamanho do texto · <output id="text-size">100%</output></span><div><button id="text-smaller" class="pill" type="button" aria-label="Diminuir texto">A−</button><button id="text-larger" class="pill" type="button" aria-label="Aumentar texto">A+</button></div></div>
+      <div class="setting-row"><label for="forecast-duration">Previsão na tela</label><select id="forecast-duration"><option value="5">5 segundos</option><option value="10">10 segundos</option><option value="15" selected>15 segundos</option><option value="25">25 segundos</option><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="120">2 minutos</option><option value="300">5 minutos</option></select></div>
+      <div class="setting-row"><button id="fullscreen" class="pill" type="button">Entrar / sair de tela cheia</button><button id="visual-reset" class="pill" type="button">Restaurar visual padrão</button></div>
+      <h3>Servidor, IA e voz</h3>
       <p>Ajustes visuais salvos neste navegador. Desempenho e voz salvos no servidor.</p>
       <div class="setting-row"><label for="performance-profile">Desempenho do servidor</label><select id="performance-profile"><option value="automatic">Automático</option><option value="economic">Econômico</option><option value="balanced">Equilibrado</option><option value="performance">Desempenho</option></select></div>
       <div class="setting-row"><label for="performance-model">Modelo de IA</label><select id="performance-model"><option value="">Seleção automática</option></select></div>
@@ -90,14 +136,11 @@
       <p id="performance-hardware" class="muted">Conecte ao servidor para identificar o hardware.</p>
       <div class="setting-row"><button id="performance-save" class="pill" type="button">Salvar desempenho</button><button id="performance-reset" class="pill" type="button">Restaurar automático</button></div>
       <p id="performance-status" role="status" class="muted"></p>
-      <div class="setting-row"><span>Tamanho do texto · <output id="text-size">100%</output></span><div><button id="text-smaller" class="pill" type="button" aria-label="Diminuir texto">A−</button><button id="text-larger" class="pill" type="button" aria-label="Aumentar texto">A+</button></div></div>
-      <div class="setting-row"><label for="forecast-duration">Previsão na tela</label><select id="forecast-duration"><option value="5">5 segundos</option><option value="10">10 segundos</option><option value="15" selected>15 segundos</option><option value="25">25 segundos</option><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="120">2 minutos</option><option value="300">5 minutos</option></select></div>
-      <div class="setting-row"><button id="fullscreen" class="pill" type="button">Entrar / sair de tela cheia</button><button id="visual-reset" class="pill" type="button">Restaurar visual padrão</button></div>
       <p class="muted">Diga “hey Luna”, depois: “abra as configurações”, “feche a janela”, “role para baixo”, “aumente o tamanho do texto”, “repita a resposta” ou “pare de falar”.</p>
     </section>
-    <section id="memory-panel" class="hidden" role="dialog" aria-labelledby="memory-title">
+    <section id="memory-panel" class="hidden dialog" role="dialog" aria-modal="true" aria-labelledby="memory-title">
       <header>
-        <div id="memory-title" class="label">Memória da Luna</div>
+        <h2 id="memory-title">Memória da Luna</h2>
         <button id="memory-close" class="pill" type="button" title="Fechar (tecla L ou Esc)">
           Fechar
         </button>
@@ -105,9 +148,9 @@
       <p id="memory-empty" class="muted">
         Nada guardado ainda. Diga “hey Luna, lembre que…”.
       </p>
-      <ul id="memory-list"></ul>
+      <ul id="memory-list" tabindex="0" aria-labelledby="memory-title"></ul>
       <footer>
-        <span class="muted">Guardado só neste servidor, em data/memory.sqlite3.</span>
+        <span id="memory-help" class="muted">As informações ficam guardadas neste servidor.</span>
         <button
           id="memory-clear"
           class="pill warn hidden"

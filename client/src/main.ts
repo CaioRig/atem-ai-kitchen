@@ -80,13 +80,23 @@ function showMood(
     panel.setMood("error", "Erro na voz");
   } else {
     face.setMood(mood);
-    panel.setMood(mood, moodLabel(mood, state));
+    panel.setMood(mood, state === "thinking" && detail === "Procurando vídeos…" ? "Executando comando" : moodLabel(mood, state));
   }
 }
 
 function setupCommon(): { panel: Panel; face: PixelFace } {
   const panel = new Panel();
   stage = new StageView(text => panel.showToast(text));
+  stage.onOpen("weather-open", () => {
+    const w = lastWeather;
+    if (w?.date && w.date !== weatherDate(w.timezone)) {
+      stage.forecast("A previsão salva é de outro dia. Diga “hey Luna, qual é a previsão para hoje?” para consultar.");
+    } else if (w) {
+      stage.forecast(lastForecast || `${weatherCardText(w)}\nDiga “hey Luna, qual é a previsão para amanhã?” para consultar outro dia.`, undefined, weatherUpdatedLabel(w));
+    } else {
+      stage.forecast("Ainda não há previsão disponível. Diga “hey Luna, qual é a previsão para hoje?”");
+    }
+  });
   screenControls = new ScreenControls(text => panel.showToast(text), stage);
   document.getElementById("replay-answer")!.addEventListener("click", () => {
     if (!location.hash && !localStorage.getItem(TOKEN_KEY)) panel.showToast("Conecte ao servidor para repetir a resposta");
@@ -96,14 +106,12 @@ function setupCommon(): { panel: Panel; face: PixelFace } {
   panel.startClock();
   restoreWeather(panel);
   window.setInterval(() => {
-    if (lastWeather?.date && lastWeather.date !== weatherDate(lastWeather.timezone)) {
+    if (lastWeather?.date && lastWeather.available && lastWeather.date !== weatherDate(lastWeather.timezone)) {
+      lastWeather = { ...lastWeather, available: false, stale: true };
+      lastForecast = "";
       panel.setWeather("Sem dados para hoje", "Aguardando atualização do clima", true);
     }
-  }, 1000);
-  document.addEventListener("keydown", (ev) => {
-    if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
-    if (ev.key === "f") void document.documentElement.requestFullscreen?.();
-  });
+  }, 30000);
   return { panel, face };
 }
 
@@ -151,7 +159,7 @@ function runLocal(panel: Panel, face: PixelFace): void {
   let mic: MicView = { state: "off", message: "" };
   const wake: WakeInfo = { available: false, reason: "sem servidor (modo local)" };
   const apply = () => {
-    showMood(panel, face, moodFor(state), mic.state);
+    showMood(panel, face, moodFor(state), mic.state, "", state);
     panel.setStatus(state === "idle" ? idleStatus(mic, wake, DEFAULT_PHRASE) : statusText(state, DEFAULT_PHRASE));
   };
   panel.setConnection("reconnecting", "modo local, sem servidor");
@@ -239,6 +247,10 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
       connected = false;
       player.stop(); // sem servidor, nada confirma o fim da fala
       stage.pause(true);
+      if (lastWeather?.available) {
+        lastWeather = { ...lastWeather, status: "offline", stale: true };
+        panel.setWeather(weatherCardText(lastWeather), weatherUpdatedLabel(lastWeather), true, lastWeather.location);
+      }
       panel.setConnection("reconnecting", `${reason}, nova tentativa em ${Math.round(retryInMs / 1000)} s`);
       refresh();
     },
@@ -316,12 +328,15 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
             panel.setMemory(memory.available, msg.count);
           }
           if (msg.action === "list") {
-            panel.renderMemories(msg.items ?? [], msg.topic ?? "");
-            if (msg.spoken && !panel.memoryVisible) {
-              panel.setMemoryVisible(true); // pedido por voz: mostra a lista por um tempo
-              window.clearTimeout(memoryAutoClose);
-              memoryAutoClose = window.setTimeout(() => panel.setMemoryVisible(false), 20000);
+            if (msg.spoken) {
+              const wasOpen = panel.memoryVisible;
+              panel.setMemoryVisible(true, /^ingredientes\b/i.test(msg.topic ?? ""));
+              if (!wasOpen) {
+                window.clearTimeout(memoryAutoClose);
+                memoryAutoClose = window.setTimeout(() => panel.setMemoryVisible(false), 20000);
+              }
             }
+            if (panel.memoryVisible) panel.renderMemories(msg.items ?? [], msg.topic ?? "");
           } else if (panel.memoryVisible && msg.action !== "confirm_clear" && msg.action !== "error") {
             socket.send({ type: "memory_list" });
           }
@@ -332,7 +347,8 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
         case "weather":
           // Resposta a uma pergunta sobre o tempo: o cartão "Clima" mostra o resumo e de quando são os dados.
           showWeather(panel, msg);
-          if (msg.forecast) stage.forecast(msg.forecast.text, forecastSettings.seconds);
+          lastForecast = msg.forecast?.text ?? "";
+          if (lastForecast) stage.forecast(lastForecast, forecastSettings.seconds, weatherUpdatedLabel(msg));
           break;
         case "videos":
           stage.results(msg.query, msg.items, msg.message);
@@ -378,17 +394,24 @@ function runConnected(panel: Panel, face: PixelFace, token: string): void {
   };
   panel.onRetry(retry);
   // Memória: botão "Memória" (tecla L) abre a lista; "Esquecer" apaga uma; "Apagar todas" pede um segundo toque.
-  const toggleMemory = () => {
+  const toggleMemory = (ingredients = false) => {
     window.clearTimeout(memoryAutoClose);
-    if (panel.memoryVisible) return panel.setMemoryVisible(false);
+    const opener = document.getElementById(ingredients ? "ingredients-open" : "memory")!;
+    if (opener.getAttribute("aria-expanded") === "true") return panel.setMemoryVisible(false);
     if (!connected || !memory.available) return panel.showToast("Memória indisponível neste momento");
-    panel.setMemoryVisible(true);
+    panel.setMemoryVisible(true, ingredients);
+    panel.showMemoryLoading(ingredients);
     socket.send({ type: "memory_list" });
   };
-  panel.onMemoryToggle(toggleMemory);
+  panel.onMemoryToggle(() => toggleMemory());
+  document.getElementById("ingredients-open")!.addEventListener("click", () => toggleMemory(true));
   panel.onMemoryClose(() => panel.setMemoryVisible(false));
-  panel.onMemoryDelete((id) => socket.send({ type: "memory_delete", id }));
-  panel.onMemoryClear(() => socket.send({ type: "memory_clear", confirm: true }));
+  panel.onMemoryDelete((id) => {
+    if (!socket.send({ type: "memory_delete", id })) panel.showToast("Servidor indisponível");
+  });
+  panel.onMemoryClear(() => {
+    if (!socket.send({ type: "memory_clear", confirm: true })) panel.showToast("Servidor indisponível");
+  });
   document.addEventListener("keydown", (ev) => {
     if (ev.target instanceof HTMLElement && ev.target.closest("input, textarea, select")) return;
     if (ev.key === "Escape") {
@@ -411,18 +434,23 @@ function main(): void {
     history.replaceState(null, "", location.pathname + location.search);
   }
   if (token) runConnected(panel, face, token);
-  else runLocal(panel, face);
+  else {
+    runLocal(panel, face);
+    document.getElementById("ingredients-open")!.addEventListener("click", () => panel.showToast("Conecte ao servidor para abrir a despensa"));
+  }
 }
 
 /** Cartão "Clima" a partir do estado do servidor; uma cópia fica no localStorage para o quiosque mostrar algo
  *  enquanto o servidor não responde (o cache de verdade é o do servidor, em data/memory.sqlite3). */
 let lastWeather: WeatherInfo | undefined;
+let lastForecast = "";
 function showWeather(panel: Panel, w: WeatherInfo): void {
   lastWeather = w;
-  panel.setWeather(weatherCardText(w), weatherUpdatedLabel(w), Boolean(w.stale));
+  panel.setWeather(weatherCardText(w), weatherUpdatedLabel(w), Boolean(w.stale), w.location);
   try {
     const saved: WeatherInfo = {
       date: w.date,
+      location: w.location,
       timezone: w.timezone,
       available: w.available,
       summary: w.summary,
@@ -448,9 +476,9 @@ function restoreWeather(panel: Panel): void {
       return panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));
     }
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: saved.timezone || "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    const info: WeatherInfo = { ...saved, available: saved.available && saved.date === today, stale: true };
+    const info: WeatherInfo = { ...saved, available: saved.available && saved.date === today, stale: true, status: "offline" };
     lastWeather = info;
-    panel.setWeather(weatherCardText(info), weatherUpdatedLabel(info), Boolean(info.stale));
+    panel.setWeather(weatherCardText(info), weatherUpdatedLabel(info), Boolean(info.stale), info.location);
   } catch {
     panel.setWeather("Sem dados", weatherUpdatedLabel({ available: false }));
   }

@@ -19,7 +19,7 @@ const server = http.createServer((req,res) => {
       window.YT={Player: class {
         constructor(node, opts) {this.node=node;window.videoEvents=opts.events;node.textContent='Player simulado para teste';setTimeout(()=>opts.events.onReady(),0);}
         destroy(){window.videoCounts.destroy++;this.node.remove();}
-        pauseVideo(){window.videoCounts.pause++;}
+        pauseVideo(){window.videoCounts.pause++;window.videoEvents.onStateChange({data:2});}
         playVideo(){window.videoCounts.play++;window.videoEvents.onStateChange({data:1});}
       }};
     });
@@ -49,14 +49,25 @@ const server = http.createServer((req,res) => {
     assert.equal(await mode(),'reply');assert.equal(await page.locator('#reply').count(),0);
     await action('settings');await action('close');assert.equal(await mode(),'reply');
     await action('home');assert.equal(await mode(),'face');
+    assert.equal(await page.locator('#answer-preview').textContent(),'Uma resposta simples.');
+    await page.locator('#answer-open').tap();assert.equal(await mode(),'reply');
+    await page.locator('#stage-back').tap();assert.equal(await mode(),'face');
     await action('settings');await page.locator('#forecast-duration').selectOption('5');await action('close');
-    const forecast={type:'weather',available:true,summary:'Hoje: sol',detail:'',forecast:{text:'Amanhã: mínima 15, máxima 25 graus e chance de chuva 30%.'}};
+    const forecast={type:'weather',available:true,location:'Ouro Fino, MG',summary:'23 °C · sol',detail:'hoje, 06/11',
+      updated_at:Date.now()/1000,status:'offline',stale:true,
+      forecast:{text:'Amanhã, sábado, 7 de novembro de 2026: mínima de 15 e máxima de 25 graus.'}};
     await page.clock.install();
     await send(forecast);assert.equal(await mode(),'forecast');
+    assert.equal(await page.locator('.weather-temperature').textContent(),'23 °C');
+    assert.match(await page.locator('#weather-updated').textContent(),/sem internet/);
+    assert.match(await page.locator('.forecast-day strong').textContent(),/7 de novembro/);
     await page.clock.fastForward(5100);assert.equal(await mode(),'face');
     await send(forecast);await thinking();
-    await send({type:'reply',view:'recipe',text:'Panqueca\nIngredientes\n2 ovos\n200 ml de leite\nModo de preparo\n'+('1. Misture delicadamente e cozinhe.\n').repeat(30),final:true});await idle();
+    await send({type:'reply',view:'recipe',text:'Panqueca\nTempo: 15 minutos\nPorções: 2\nIngredientes\n2 ovos\n200 ml de leite\nModo de preparo\n'+Array.from({length:30},(_,i)=>`${i+1}. Misture delicadamente e cozinhe.\n`).join(''),final:true});await idle();
     await page.clock.fastForward(5100);assert.equal(await mode(),'recipe');
+    assert.deepEqual(await page.locator('ul.recipe-list strong').allTextContents(),['2','200 ml']);
+    assert.equal(await page.locator('.recipe-steps li').last().evaluate(e=>e.value),30);
+    assert.deepEqual(await page.locator('.recipe-meta').allTextContents(),['Tempo: 15 minutos','Porções: 2']);
     await action('down');assert(await page.locator('#stage-scroll').evaluate(e=>e.scrollTop>0));
     await action('up');await page.screenshot({path:'data/ui-check/stage-recipe.png'});
     await thinking();await send({type:'videos',query:'receita de pão',items:[],message:'Resultados no site oficial.'});await idle();
@@ -82,7 +93,12 @@ const server = http.createServer((req,res) => {
     await send({type:'videos',query:'pao',items:[{id:'javascript:bad',title:'Recusado',source:'falsa'},{id:'abcdefghijk',title:'Vídeo de teste <img src=x>',source:'Fonte simulada'}],message:''});
     assert.equal(await page.locator('.video-result').count(),1);assert.equal(await page.locator('#stage-scroll img').count(),0);
     await action('video1');assert.equal(await mode(),'video');
-    await page.clock.runFor(50);await action('resume_video');await action('pause_video');
+    await page.clock.runFor(50);
+    await page.getByRole('button',{name:'Reproduzir',exact:true}).click();
+    assert.equal(await page.locator('#stage-scroll [role=status]').textContent(),'Em reprodução');
+    await page.getByRole('button',{name:'Pausar',exact:true}).click();
+    assert.equal(await page.locator('#stage-scroll [role=status]').textContent(),'Pausado');
+    await action('resume_video');await action('pause_video');
     assert(await page.evaluate(()=>window.videoCounts.play>0 && window.videoCounts.pause>0));
     assert(sent.some(m=>m.type==='cancel'));
     await page.evaluate(()=>window.videoEvents.onAutoplayBlocked());

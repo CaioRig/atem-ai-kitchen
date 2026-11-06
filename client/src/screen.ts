@@ -5,14 +5,28 @@ export function textScale(value: unknown): number {
   return Number.isFinite(n) && n >= 1 && n <= 1.5 ? n : 1;
 }
 const KEY = "luna.text.scale";
+const THEME_KEY = "luna.theme";
 const panels = ["settings-panel", "memory-panel"];
 
 export class ScreenControls {
   private scale = 1;
+  private returnFocus: HTMLElement | null = null;
   constructor(private notice: (text: string) => void, private stage: StageView) {
-    new ResizeObserver(entries => {
-      document.documentElement.style.setProperty("--controls-height", `${entries[0].target.getBoundingClientRect().height}px`);
-    }).observe(document.getElementById("indicators")!);
+    const theme = document.getElementById("theme") as HTMLSelectElement;
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const renderTheme = () => {
+      document.documentElement.dataset.theme = theme.value === "auto"
+        ? (systemTheme.matches ? "dark" : "light") : theme.value;
+    };
+    const applyTheme = () => {
+      renderTheme();
+      try { localStorage.setItem(THEME_KEY, theme.value); } catch { /* sessão */ }
+    };
+    try { theme.value = localStorage.getItem(THEME_KEY) || "auto"; } catch { /* sessão */ }
+    if (!theme.value) theme.value = "auto";
+    applyTheme();
+    theme.addEventListener("change", applyTheme);
+    systemTheme.addEventListener("change", renderTheme);
     try { this.scale = textScale(localStorage.getItem(KEY)); } catch { /* sessao */ }
     this.applyScale();
     document.getElementById("settings-open")!.addEventListener("click", () => this.execute("settings"));
@@ -22,22 +36,27 @@ export class ScreenControls {
     document.getElementById("text-smaller")!.addEventListener("click", () => this.execute("smaller"));
     document.getElementById("visual-reset")!.addEventListener("click", () => {
       this.scale = 1; this.applyScale();
+      theme.value = "auto"; applyTheme();
       const duration = document.getElementById("forecast-duration") as HTMLInputElement;
       duration.value = "15"; duration.dispatchEvent(new Event("change"));
       this.notice("Visual padrão restaurado");
     });
-    document.getElementById("fullscreen")!.addEventListener("click", async () => {
+    const fullscreen = async () => {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
         else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
         else this.notice("Tela cheia indisponível neste navegador");
       } catch { this.notice("O navegador não permitiu tela cheia"); }
-    });
+    };
+    document.getElementById("fullscreen")!.addEventListener("click", fullscreen);
     document.addEventListener("luna:panel", (event) => {
       const id = (event as CustomEvent<string>).detail;
       for (const other of panels) if (other !== id) this.close(other);
     });
+    document.addEventListener("luna:panel-changed", () => this.syncDialog());
     document.addEventListener("keydown", (event) => {
+      if (event.key === "f" && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !(event.target instanceof HTMLElement && event.target.closest("input, textarea, select"))) void fullscreen();
       if (event.key === "Escape" && (this.active() || this.stage.mode !== "face")) {
         event.stopImmediatePropagation(); this.execute("close");
       }
@@ -47,14 +66,30 @@ export class ScreenControls {
     return panels.find(id => !document.getElementById(id)!.classList.contains("hidden"));
   }
   private close(id: string): void {
-    if (id === "settings-panel") document.getElementById(id)!.classList.add("hidden");
+    if (id === "settings-panel") {
+      document.getElementById(id)!.classList.add("hidden");
+      this.syncDialog();
+    }
     else document.getElementById(id.replace("-panel", "-close"))!.click();
+  }
+  private syncDialog(): void {
+    const app = document.getElementById("app")!;
+    const active = this.active();
+    if (active) {
+      const dialog = document.getElementById(active)!;
+      if (!app.inert) this.returnFocus = app.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+      app.inert = true;
+      if (!dialog.contains(document.activeElement)) dialog.querySelector("button")?.focus();
+    } else if (app.inert) {
+      app.inert = false;
+      (this.returnFocus?.getClientRects().length ? this.returnFocus : document.getElementById("home"))?.focus();
+      this.returnFocus = null;
+    }
   }
   private applyScale(): void {
     document.documentElement.style.setProperty("--text-scale", String(this.scale));
     document.getElementById("text-size")!.textContent = `${Math.round(this.scale * 100)}%`;
     try { localStorage.setItem(KEY, String(this.scale)); } catch { /* sessao */ }
-    window.dispatchEvent(new Event("resize"));
   }
   execute(action: string, message = ""): void {
     switch (action) {
@@ -62,11 +97,13 @@ export class ScreenControls {
       case "settings":
         document.dispatchEvent(new CustomEvent("luna:panel", { detail: "settings-panel" }));
         document.getElementById("settings-panel")!.classList.remove("hidden");
+        this.syncDialog();
+        document.dispatchEvent(new Event("luna:settings-opened"));
         break;
       case "memory": {
         const button = document.getElementById("memory") as HTMLButtonElement;
         if (button.disabled || button.classList.contains("hidden")) this.notice("Memória indisponível neste momento");
-        else if (this.active() !== "memory-panel") button.click();
+        else if (button.getAttribute("aria-expanded") !== "true") button.click();
         break;
       }
       case "close": {
